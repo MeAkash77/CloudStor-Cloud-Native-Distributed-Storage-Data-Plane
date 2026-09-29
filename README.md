@@ -20,78 +20,6 @@
 |------------------|
 | The CubeFS Project holds bi-weekly community online meeting. To join or watch previous meeting notes and recordings, please see [meeting schedule](https://github.com/cubefs/community/wiki/Meeting-Schedule) and [meeting minutes](https://github.com/cubefs/community/wiki/Meeting-Agenda-and-Notes). |
 
-
-## Overview
-
-Cubestor is an open-source cloud-native distributed file & object storage system, hosted by the [Cloud Native Computing Foundation](https://cncf.io) (CNCF) as a [graduated](https://www.cncf.io/projects/) project.
-
-## What can you build with Cubestor
-
-* As an open-source distributed storage, CubeFS can serve as your datacenter filesystem, data lake storage infra, and private or hybrid cloud storage. 
-* Moreover, it can be run in public cloud services, providing cache acceleration and file system semantics on top of public cloud storage such as S3.
-
-* In particular, CubeFS enables the separation of storage/compute architecture for databases, search systems, and AI/ML applications.
-
-Some key features of Cubestor include:
-
-- Multiple access protocols such as POSIX, HDFS, S3, and its own REST API
-- Highly scalable metadata service with strong consistency  
-- Performance optimization of large/small files and sequential/random writes
-- Multi-tenancy support with better resource utilization and tenant isolation
-- Hybrid cloud I/O acceleration through multi-level caching
-- Flexible storage policies, high-performance replication or low-cost erasure coding
-
-
-<div width="100%" style="text-align:center;"><img alt="CubeFS Architecture" src="https://raw.githubusercontent.com/cubefs/cubefs/master/docs/source/overview/pic/cfs-arch-ec.png"/></div>
-
-## Governance
-
-[Governance documentation](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md) plays a crucial role in establishing clear guidelines, procedures, and structures within an organization or project
-
-## Reference
-
-Haifeng Liu, et al., CFS: A Distributed File System for Large Scale Container Platforms. SIGMOD‘19, June 30-July 5, 2019, Amsterdam, Netherlands. 
-
-For more information, please refer to https://dl.acm.org/citation.cfm?doid=3299869.3314046 and https://arxiv.org/abs/1911.03001
-
-
-## License
-
-CubeFS is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
-For detail see [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-## Note
-
-The master branch may be in an unstable or even broken state during development. Please use releases instead of the master branch in order to get a stable set of binaries.
-
-## Star History
-
-<a href="https://www.star-history.com/?type=date&repos=cubefs%2Fcubefs">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=cubefs/cubefs&type=date&theme=dark&legend=top-left&sealed_token=xgnMZkPaPb9Fn_mq7WzFXGcNYAP4QQqg8PSxcyCHBwPkipwEAxHEW2KtMRoNtYHplKNVpQA2WNsYBbRmo8Mw1_zFb99H-f9FnO8ybwMGZNodW0Wr_hlpcQ" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=cubefs/cubefs&type=date&legend=top-left&sealed_token=xgnMZkPaPb9Fn_mq7WzFXGcNYAP4QQqg8PSxcyCHBwPkipwEAxHEW2KtMRoNtYHplKNVpQA2WNsYBbRmo8Mw1_zFb99H-f9FnO8ybwMGZNodW0Wr_hlpcQ" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=cubefs/cubefs&type=date&legend=top-left&sealed_token=xgnMZkPaPb9Fn_mq7WzFXGcNYAP4QQqg8PSxcyCHBwPkipwEAxHEW2KtMRoNtYHplKNVpQA2WNsYBbRmo8Mw1_zFb99H-f9FnO8ybwMGZNodW0Wr_hlpcQ" />
- </picture>
-</a>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # CloudStor — Cloud-Native Distributed Storage Data Plane 🚀
 
 *A cloud-native distributed storage data plane engineered around scalable metadata management, distributed data placement, replication, erasure coding, object storage, multi-tenancy, caching, and fault-tolerant coordination.*
@@ -3074,4 +3002,46 @@ CloudStor brings together the core ideas behind modern distributed storage:
    └───────────────────┘
 ```
 
-The result is a storage architecture designed around **scalability, durability, fault tolerance, multiple access protocols, and cloud-native operation**.
+The result is a storage architecture designed around **scalability, durability, fault tolerance, multiple access protocols, and cloud-native operation**.                                                                                                                                                                                               ## Overview
+
+Cubestor is an open-source cloud-native distributed file & object storage system, hosted by the [Cloud Native Computing Foundation](https://cncf.io) (CNCF) as a [graduated](https://www.cncf.io/projects/) project.
+
+## What can you build with Cubestor
+
+* As an open-source distributed storage, CubeFS can serve as your datacenter filesystem, data lake storage infra, and private or hybrid cloud storage. 
+* Moreover, it can be run in public cloud services, providing cache acceleration and file system semantics on top of public cloud storage such as S3.
+
+* In particular, CubeFS enables the separation of storage/compute architecture for databases, search systems, and AI/ML applications.
+
+Some key features of Cubestor include:
+
+- Multiple access protocols such as POSIX, HDFS, S3, and its own REST API
+- Highly scalable metadata service with strong consistency  
+- Performance optimization of large/small files and sequential/random writes
+- Multi-tenancy support with better resource utilization and tenant isolation
+- Hybrid cloud I/O acceleration through multi-level caching
+- Flexible storage policies, high-performance replication or low-cost erasure coding
+
+
+<div width="100%" style="text-align:center;"><img alt="CubeFS Architecture" src="https://raw.githubusercontent.com/cubefs/cubefs/master/docs/source/overview/pic/cfs-arch-ec.png"/></div>
+
+## Governance
+
+[Governance documentation](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md) plays a crucial role in establishing clear guidelines, procedures, and structures within an organization or project
+
+## Reference
+
+Haifeng Liu, et al., CFS: A Distributed File System for Large Scale Container Platforms. SIGMOD‘19, June 30-July 5, 2019, Amsterdam, Netherlands. 
+
+For more information, please refer to https://dl.acm.org/citation.cfm?doid=3299869.3314046 and https://arxiv.org/abs/1911.03001
+
+
+## License
+
+CubeFS is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
+For detail see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## Note
+
+The master branch may be in an unstable or even broken state during development. Please use releases instead of the master branch in order to get a stable set of binaries.
+
