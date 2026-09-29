@@ -1,0 +1,391 @@
+// Copyright 2018 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package master
+
+import (
+	"fmt"
+	syslog "log"
+	"strings"
+	"sync"
+
+	"github.com/cubefs/cubefs/depends/tiglabs/raft/proto"
+	cfsProto "github.com/cubefs/cubefs/proto"
+	"github.com/cubefs/cubefs/remotecache/flashgroupmanager"
+	"github.com/cubefs/cubefs/util/log"
+)
+
+// LeaderInfo represents the leader's information
+type LeaderInfo struct {
+	addr string //host:port
+	id   uint64
+}
+
+func (m *Server) getCurrAddr() string {
+	return AddrDatabase[m.id]
+}
+
+func (m *Server) handleLeaderChange(leader uint64) {
+	m.leaderChangeLk.Lock()
+	defer m.leaderChangeLk.Unlock()
+
+	if m.partition != nil { // parition maybe nil for testcase
+		leaderId, term := m.partition.LeaderTerm()
+		log.LogWarnf("handleLeaderChange: get raft leader %d, term %d, old %d", leaderId, term, leader)
+
+		if leaderId != leader {
+			log.LogWarnf("handleLeaderChange: leader id already changed, old %d, now %d", leader, leaderId)
+			return
+		}
+	}
+
+	if leader == 0 {
+		log.LogWarnf("action[handleLeaderChange] but no leader")
+		if WarnMetrics != nil {
+			WarnMetrics.reset()
+		}
+		m.leaderInfo.id = 0
+		m.leaderInfo.addr = ""
+		return
+	}
+
+	// oldLeaderAddr := m.leaderInfo.addr
+	m.leaderInfo.addr = AddrDatabase[leader]
+	m.leaderInfo.id = leader
+
+	log.LogWarnf("action[handleLeaderChange] current id [%v] new leader addr [%v] leader id [%v]", m.id, m.leaderInfo.addr, leader)
+	m.reverseProxy = m.newReverseProxy()
+
+	m.metaReady = false
+	m.cluster.metaReady = false
+	if m.id == leader {
+		Warn(m.clusterName, fmt.Sprintf("clusterID[%v] current is leader, leader is changed to %v",
+			m.clusterName, m.leaderInfo.addr))
+		m.cluster.checkPersistClusterValue()
+		m.loadMetadata()
+		m.cluster.metaReady = true
+		m.metaReady = true
+		m.cluster.checkDataNodeHeartbeat()
+		m.cluster.checkMetaNodeHeartbeat()
+		m.cluster.checkLcNodeHeartbeat()
+		m.cluster.checkFlashNodeHeartbeat()
+		m.cluster.lcMgr.startLcScanHandleLeaderChange()
+		m.cluster.flashManMgr.startFlashScanHandleLeaderChange()
+		m.cluster.followerReadManager.reSet()
+	} else {
+		Warn(m.clusterName, fmt.Sprintf("clusterID[%v] leader is changed to %v",
+			m.clusterName, m.leaderInfo.addr))
+		m.clearMetadata()
+		if m.cluster.lcMgr != nil {
+			close(m.cluster.lcMgr.exitCh)
+			m.cluster.lcMgr = newLifecycleManager()
+			m.cluster.lcMgr.cluster = m.cluster
+		}
+		if m.cluster.flashManMgr != nil {
+			close(m.cluster.flashManMgr.exitCh)
+			m.cluster.flashManMgr = newFlashManualTaskManager(m.cluster)
+		}
+		m.metaReady = false
+		m.cluster.metaReady = false
+		if WarnMetrics != nil {
+			WarnMetrics.reset()
+		}
+	}
+}
+
+func (m *Server) handlePeerChange(confChange *proto.ConfChange) (err error) {
+	var msg string
+	addr := string(confChange.Context)
+	switch confChange.Type {
+	case proto.ConfAddNode:
+		var arr []string
+		if arr = strings.Split(addr, colonSplit); len(arr) < 2 {
+			msg = fmt.Sprintf("action[handlePeerChange] clusterID[%v] nodeAddr[%v] is invalid", m.clusterName, addr)
+			break
+		}
+		m.raftStore.AddNodeWithPort(confChange.Peer.ID, arr[0], int(m.config.heartbeatPort), int(m.config.replicaPort))
+		AddrDatabase[confChange.Peer.ID] = string(confChange.Context)
+		msg = fmt.Sprintf("clusterID[%v] peerID:%v,nodeAddr[%v] has been add", m.clusterName, confChange.Peer.ID, addr)
+	case proto.ConfRemoveNode:
+		m.raftStore.DeleteNode(confChange.Peer.ID)
+		msg = fmt.Sprintf("clusterID[%v] peerID:%v,nodeAddr[%v] has been removed", m.clusterName, confChange.Peer.ID, addr)
+	default:
+		// do nothing
+	}
+	Warn(m.clusterName, msg)
+	return
+}
+
+func (m *Server) handleApplySnapshot() {
+	m.fsm.restore()
+	m.restoreIDAlloc()
+}
+
+func (m *Server) handleRaftUserCmd(opt uint32, key string, cmdMap map[string][]byte) (err error) {
+	log.LogInfof("action[handleRaftUserCmd] opt %v, key %v, map len %v", opt, key, len(cmdMap))
+	switch opt {
+	case opSyncPutFollowerApiLimiterInfo, opSyncPutApiLimiterInfo:
+		if m.cluster != nil && !m.partition.IsRaftLeader() {
+			m.cluster.apiLimiter.updateLimiterInfoFromLeader(cmdMap[key])
+		}
+	default:
+		log.LogErrorf("action[handleRaftUserCmd] opt %v not supported,key %v, map len %v", opt, key, len(cmdMap))
+	}
+	return nil
+}
+
+func (m *Server) restoreIDAlloc() {
+	m.cluster.idAlloc.restore()
+}
+
+// Load stored metadata into the memory
+func (m *Server) loadMetadata() {
+	var err error
+	log.LogInfo("action[loadMetadata] begin")
+	syslog.Println("action[loadMetadata] begin")
+	m.clearMetadata()
+	m.restoreIDAlloc()
+	m.cluster.fsm.restore()
+
+	if err = m.cluster.loadClusterValue(); err != nil {
+		panic(err)
+	}
+
+	var loadDomain bool
+	if m.cluster.FaultDomain { // try load exclude
+		if loadDomain, err = m.cluster.loadZoneDomain(); err != nil {
+			log.LogInfof("action[putZoneDomain] err[%v]", err)
+			panic(err)
+		}
+		if err = m.cluster.loadNodeSetGrps(); err != nil {
+			panic(err)
+		}
+		if loadDomain {
+			// if load success the domain already init before this startup,
+			// start grp manager ,load nodeset can trigger build ns grps
+			m.cluster.domainManager.start()
+		}
+	}
+
+	if err = m.cluster.loadNodeSets(); err != nil {
+		panic(err)
+	}
+
+	if m.cluster.FaultDomain {
+		log.LogInfof("action[FaultDomain] set")
+		if !loadDomain { // first restart after domain item be added
+			if err = m.cluster.putZoneDomain(true); err != nil {
+				log.LogInfof("action[putZoneDomain] err[%v]", err)
+				panic(err)
+			}
+			m.cluster.domainManager.start()
+		}
+	}
+
+	if err = m.cluster.loadDataNodes(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadMetaNodes(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadFlashNodes(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadFlashGroups(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadFlashTopology(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadZoneValue(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadVols(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadMetaPartitions(); err != nil {
+		panic(err)
+	}
+
+	if err = m.cluster.loadDataPartitions(); err != nil {
+		panic(err)
+	}
+	if err = m.cluster.loadDecommissionDiskList(); err != nil {
+		panic(err)
+	}
+	if err = m.cluster.startDecommissionListTraverse(); err != nil {
+		panic(err)
+	}
+
+	log.LogInfo("action[loadUserInfo] begin")
+	if err = m.user.loadUserStore(); err != nil {
+		panic(err)
+	}
+	if err = m.user.loadAKStore(); err != nil {
+		panic(err)
+	}
+	if err = m.user.loadVolUsers(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadUserInfo] end")
+
+	log.LogInfo("action[refreshUser] begin")
+	if err = m.refreshUser(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[refreshUser] end")
+
+	log.LogInfo("action[loadApiLimiterInfo] begin")
+	if err = m.cluster.loadApiLimiterInfo(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadApiLimiterInfo] end")
+
+	log.LogInfo("action[loadQuota] begin")
+	if err = m.cluster.loadQuota(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadQuota] end")
+
+	log.LogInfo("action[loadLcConfs] begin")
+	if err = m.cluster.loadLcConfs(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadLcConfs] end")
+
+	log.LogInfo("action[loadLcTasks] begin")
+	if err = m.cluster.loadLcTasks(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadLcTasks] end")
+
+	log.LogInfo("action[loadLcResults] begin")
+	if err = m.cluster.loadLcResults(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadLcResults] end")
+
+	log.LogInfo("action[loadLcNodes] begin")
+	if err = m.cluster.loadLcNodes(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadLcNodes] end")
+
+	log.LogInfo("action[loadFlashManualTasks] begin")
+	if err = m.cluster.loadFlashManualTasks(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadFlashManualTasks] end")
+
+	log.LogInfo("action[loadS3QoSInfo] begin")
+	if err = m.cluster.loadS3ApiQosInfo(); err != nil {
+		panic(err)
+	}
+	log.LogInfo("action[loadS3QoSInfo] end")
+
+	m.cluster.checkMediaVaild()
+
+	log.LogInfo("action[loadMetadata] end")
+	syslog.Println("action[loadMetadata] end")
+}
+
+func (m *Server) clearMetadata() {
+	// stop decommission dp traverse
+	zones := m.cluster.t.getAllZones()
+	for _, zone := range zones {
+		nsc := zone.getAllNodeSet()
+		for _, ns := range nsc {
+			ns.stopDecommissionSchedule()
+		}
+	}
+	// clear bad dp ids
+	m.cluster.clearBadDataPartitionIDS()
+	m.cluster.clearTopology()
+	m.cluster.clearDataNodes()
+	m.cluster.clearMetaNodes()
+	m.cluster.clearLcNodes()
+	m.cluster.clearVols()
+
+	m.cluster.DataNodeToDecommissionRepairDpMap = sync.Map{}
+	m.cluster.NoSamePeerDps = sync.Map{}
+
+	if m.user != nil {
+		// leader change event may be before m.user initialization
+		m.user.clearUserStore()
+		m.user.clearAKStore()
+		m.user.clearVolUsers()
+	}
+
+	m.cluster.t = newTopology()
+	// m.cluster.apiLimiter.Clear()
+
+	m.cluster.flashNodeTopo.Clear()
+	m.cluster.flashNodeTopo = flashgroupmanager.NewFlashNodeTopology()
+	m.cluster.flashNodeTopo.SyncFlashGroupFunc = m.cluster.syncUpdateFlashGroup
+}
+
+func (m *Server) refreshUser() (err error) {
+	/* todo create user automatically
+	var userInfo *cfsProto.UserInfo
+	for volName, vol := range m.cluster.allVols() {
+		if _, err = m.user.getUserInfo(vol.Owner); err == cfsProto.ErrUserNotExists {
+			if len(vol.OSSAccessKey) > 0 && len(vol.OSSSecretKey) > 0 {
+				var param = cfsProto.UserCreateParam{
+					ID:        vol.Owner,
+					Password:  DefaultUserPassword,
+					AccessKey: vol.OSSAccessKey,
+					SecretKey: vol.OSSSecretKey,
+					Type:      cfsProto.UserTypeNormal,
+				}
+				userInfo, err = m.user.createKey(&param)
+				if err != nil && err != cfsProto.ErrDuplicateUserID && err != cfsProto.ErrDuplicateAccessKey {
+					return err
+				}
+			} else {
+				var param = cfsProto.UserCreateParam{
+					ID:       vol.Owner,
+					Password: DefaultUserPassword,
+					Type:     cfsProto.UserTypeNormal,
+				}
+				userInfo, err = m.user.createKey(&param)
+				if err != nil && err != cfsProto.ErrDuplicateUserID {
+					return err
+				}
+			}
+			if err == nil && userInfo != nil {
+				if _, err = m.user.addOwnVol(userInfo.UserID, volName); err != nil {
+					return err
+				}
+			}
+		}
+	}*/
+	if _, err = m.user.getUserInfo(RootUserID); err != nil {
+		param := cfsProto.UserCreateParam{
+			ID:       RootUserID,
+			Password: DefaultRootPasswd,
+			Type:     cfsProto.UserTypeRoot,
+		}
+		if _, err = m.user.createKey(&param); err != nil {
+			return err
+		}
+	}
+	return nil
+}

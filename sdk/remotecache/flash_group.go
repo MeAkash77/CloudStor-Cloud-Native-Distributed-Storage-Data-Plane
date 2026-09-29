@@ -1,0 +1,172 @@
+// Copyright 2018 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package remotecache
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+
+	"github.com/cubefs/cubefs/proto"
+	"github.com/cubefs/cubefs/util/btree"
+	"github.com/cubefs/cubefs/util/log"
+)
+
+type FlashGroup struct {
+	*proto.FlashGroupInfo
+	rankedHost       map[ZoneRankType][]string
+	hostLock         sync.RWMutex
+	epoch            uint64
+	hostTimeoutCount map[string]int32
+}
+
+func (fg *FlashGroup) String() string {
+	if fg == nil {
+		return ""
+	}
+	return fmt.Sprintf("flashGroup[fgId(%v) Hosts(%v)]", fg.ID, fg.Hosts)
+}
+
+func NewFlashGroup(flashGroupInfo *proto.FlashGroupInfo, rankedHost map[ZoneRankType][]string) *FlashGroup {
+	return &FlashGroup{
+		FlashGroupInfo:   flashGroupInfo,
+		rankedHost:       rankedHost,
+		hostTimeoutCount: make(map[string]int32),
+	}
+}
+
+func (fg *FlashGroup) getFlashHost() (host string) {
+	fg.hostLock.RLock()
+	defer fg.hostLock.RUnlock()
+
+	epoch := atomic.AddUint64(&fg.epoch, 1)
+
+	classifyHost := fg.rankedHost
+	sameZoneHosts := classifyHost[SameZoneRank]
+	sameRegionHosts := classifyHost[SameRegionRank]
+	sameZoneLen := uint64(len(sameZoneHosts))
+	sameRegionLen := uint64(len(sameRegionHosts))
+
+	if sameZoneLen == 0 && sameRegionLen == 0 {
+		return
+	}
+	if sameZoneLen == 0 {
+		host = sameRegionHosts[epoch%sameRegionLen]
+	} else if sameRegionLen == 0 {
+		host = sameZoneHosts[epoch%sameZoneLen]
+	} else {
+		if epoch%100 < uint64(SameZoneWeight) {
+			host = sameZoneHosts[epoch%sameZoneLen]
+		} else {
+			host = sameRegionHosts[epoch%sameRegionLen]
+		}
+	}
+	return
+}
+
+func (fg *FlashGroup) getFlashHostWithCrossRegion() (host string) {
+	fg.hostLock.RLock()
+	defer fg.hostLock.RUnlock()
+
+	epoch := atomic.AddUint64(&fg.epoch, 1)
+
+	classifyHost := fg.rankedHost
+	sameZoneHosts := classifyHost[SameZoneRank]
+	sameRegionHosts := classifyHost[SameRegionRank]
+	crossRegionHosts := classifyHost[CrossRegionRank]
+	sameZoneLen := uint64(len(sameZoneHosts))
+	sameRegionLen := uint64(len(sameRegionHosts))
+	crossRegionLen := uint64(len(crossRegionHosts))
+
+	if sameZoneLen == 0 && sameRegionLen == 0 && crossRegionLen == 0 {
+		return
+	}
+	if sameZoneLen == 0 && crossRegionLen == 0 {
+		host = sameRegionHosts[epoch%sameRegionLen]
+	} else if sameRegionLen == 0 && crossRegionLen == 0 {
+		host = sameZoneHosts[epoch%sameZoneLen]
+	} else if sameZoneLen == 0 && sameRegionLen == 0 {
+		host = crossRegionHosts[epoch%crossRegionLen]
+	} else {
+		weightedValue := epoch % 100
+		if sameZoneLen > 0 && weightedValue < uint64(SameZoneWeight) {
+			host = sameZoneHosts[epoch%sameZoneLen]
+		} else if sameRegionLen > 0 && weightedValue < uint64(SameZoneWeight+SameRegionWeight) {
+			host = sameRegionHosts[epoch%sameRegionLen]
+		} else if crossRegionLen > 0 {
+			host = crossRegionHosts[epoch%crossRegionLen]
+		} else if sameRegionLen > 0 {
+			host = sameRegionHosts[epoch%sameRegionLen]
+		} else if sameZoneLen > 0 {
+			host = sameZoneHosts[epoch%sameZoneLen]
+		}
+	}
+	return
+}
+
+func (fg *FlashGroup) moveToUnknownRank(addr string, err error, timeoutCount int32) bool {
+	if !(err != nil && (os.IsTimeout(err) || strings.Contains(err.Error(), syscall.ECONNREFUSED.Error()))) {
+		return false
+	}
+	fg.hostLock.Lock()
+	defer fg.hostLock.Unlock()
+
+	fg.hostTimeoutCount[addr]++
+	if fg.hostTimeoutCount[addr] < timeoutCount {
+		log.LogInfof("moveToUnknownRank: fgID(%v) host(%v) timeoutCount(%v) not reached maxTimeoutCount(%v)", fg.ID, addr, fg.hostTimeoutCount[addr], timeoutCount)
+		return false
+	}
+
+	moved := false
+	for rank := SameZoneRank; rank <= SameRegionRank; rank++ {
+		hosts := fg.rankedHost[rank]
+		for i, host := range hosts {
+			if host == addr {
+				moved = true
+				hosts = append(hosts[:i], hosts[i+1:]...)
+				break
+			}
+		}
+		if moved {
+			fg.rankedHost[rank] = hosts
+			break
+		}
+	}
+
+	unknowns := fg.rankedHost[UnknownZoneRank]
+	unknowns = append(unknowns, addr)
+	fg.rankedHost[UnknownZoneRank] = unknowns
+	fg.hostTimeoutCount[addr] = 0
+
+	log.LogWarnf("moveToUnknownRank: fgID(%v) host(%v) timeoutCount reset to 0 by err %v", fg.ID, addr, err.Error())
+	return moved
+}
+
+type SlotItem struct {
+	slot       uint32
+	FlashGroup *FlashGroup
+}
+
+func (this *SlotItem) Less(than btree.Item) bool {
+	that := than.(*SlotItem)
+	return this.slot < that.slot
+}
+
+func (this *SlotItem) Copy() btree.Item {
+	return this
+}

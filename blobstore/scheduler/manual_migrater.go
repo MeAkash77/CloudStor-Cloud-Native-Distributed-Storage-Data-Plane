@@ -1,0 +1,86 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package scheduler
+
+import (
+	"context"
+
+	"github.com/cubefs/cubefs/blobstore/common/proto"
+	"github.com/cubefs/cubefs/blobstore/common/recordlog"
+	"github.com/cubefs/cubefs/blobstore/common/taskswitch"
+	"github.com/cubefs/cubefs/blobstore/common/trace"
+	"github.com/cubefs/cubefs/blobstore/scheduler/base"
+	"github.com/cubefs/cubefs/blobstore/scheduler/client"
+)
+
+// ManualMigrateMgr manual migrate manager
+type ManualMigrateMgr struct {
+	IMigrator
+
+	clusterMgrCli    client.ClusterMgrAPI
+	abnormalReporter *base.AbnormalReporter
+}
+
+// NewManualMigrateMgr returns manual migrate manager
+func NewManualMigrateMgr(clusterMgrCli client.ClusterMgrAPI, volumeUpdater client.TaskAPI,
+	taskLogger recordlog.Encoder, conf *MigrateConfig, diskGetter DiskGetter,
+) *ManualMigrateMgr {
+	mgr := &ManualMigrateMgr{
+		clusterMgrCli: clusterMgrCli,
+	}
+	mgr.IMigrator = NewMigrateMgr(clusterMgrCli, volumeUpdater, taskswitch.NewEnabledTaskSwitch(), taskLogger,
+		conf, proto.TaskTypeManualMigrate, diskGetter)
+	mgr.abnormalReporter = base.NewAbnormalReporter(conf.ClusterID, ShardRepair, base.ChunkMissMigrateAbnormal)
+	conf.reportTaskCallback = mgr.reportMissChuckMigrated
+	return mgr
+}
+
+// AddManualTask add manual migrate task
+func (mgr *ManualMigrateMgr) AddManualTask(ctx context.Context, vuid proto.Vuid, forbiddenDirectDownload bool) (err error) {
+	span := trace.SpanFromContextSafe(ctx)
+
+	volume, err := mgr.clusterMgrCli.GetVolumeInfo(ctx, vuid.Vid())
+	if err != nil {
+		span.Errorf("get volume failed: vid[%d], err[%+v]", vuid.Vid(), err)
+		return err
+	}
+	diskID := volume.VunitLocations[vuid.Index()].DiskID
+	disk, err := mgr.clusterMgrCli.GetDiskInfo(ctx, diskID)
+	if err != nil {
+		span.Errorf("get disk info failed:  disk_id[%d], err[%+v]", err)
+		return err
+	}
+
+	task := &proto.MigrateTask{
+		TaskID:                  client.GenMigrateTaskID(proto.TaskTypeManualMigrate, disk.DiskID, uint32(vuid.Vid())),
+		TaskType:                proto.TaskTypeManualMigrate,
+		State:                   proto.MigrateStateInited,
+		SourceIDC:               disk.Idc,
+		SourceDiskID:            disk.DiskID,
+		SourceVuid:              vuid,
+		ForbiddenDirectDownload: forbiddenDirectDownload,
+	}
+	if err = mgr.IMigrator.AddTask(ctx, task); err != nil {
+		span.Errorf("add manual migrate task failed: task_info[%+v], err[%+v]", task, err)
+		return err
+	}
+
+	span.Debugf("add manual migrate task success: task_info[%+v]", task)
+	return nil
+}
+
+func (mgr *ManualMigrateMgr) reportMissChuckMigrated(disk proto.DiskID, vuid proto.Vuid) {
+	mgr.abnormalReporter.CancelAbnormal(disk, vuid)
+}

@@ -1,0 +1,270 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+// nolint
+package shardnode
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
+
+	bnapi "github.com/cubefs/cubefs/blobstore/api/blobnode"
+	cmapi "github.com/cubefs/cubefs/blobstore/api/clustermgr"
+	"github.com/cubefs/cubefs/blobstore/api/scheduler"
+	shardnodeapi "github.com/cubefs/cubefs/blobstore/api/shardnode"
+	"github.com/cubefs/cubefs/blobstore/cmd"
+	apierr "github.com/cubefs/cubefs/blobstore/common/errors"
+	"github.com/cubefs/cubefs/blobstore/common/proto"
+	"github.com/cubefs/cubefs/blobstore/common/raft"
+	"github.com/cubefs/cubefs/blobstore/common/rpc2"
+	"github.com/cubefs/cubefs/blobstore/common/security"
+	"github.com/cubefs/cubefs/blobstore/common/taskswitch"
+	"github.com/cubefs/cubefs/blobstore/common/trace"
+	"github.com/cubefs/cubefs/blobstore/shardnode/base"
+	"github.com/cubefs/cubefs/blobstore/shardnode/catalog"
+	"github.com/cubefs/cubefs/blobstore/shardnode/catalog/allocator"
+	"github.com/cubefs/cubefs/blobstore/shardnode/message"
+	"github.com/cubefs/cubefs/blobstore/shardnode/storage"
+	"github.com/cubefs/cubefs/blobstore/shardnode/storage/store"
+	"github.com/cubefs/cubefs/blobstore/util/closer"
+	"github.com/cubefs/cubefs/blobstore/util/selector"
+	"github.com/cubefs/cubefs/blobstore/util/taskpool"
+)
+
+var (
+	globalService *service
+	conf          Config
+)
+
+// singleton service instance control
+var serviceOnce sync.Once
+
+const defaultTaskPoolSize = 64
+
+type Config struct {
+	cmd.Config
+	CmConfig    cmapi.Config `json:"cm_config"`
+	RegionMagic string       `json:"region_magic"`
+
+	DisksConfig struct {
+		Disks           []string `json:"disks"`
+		CheckMountPoint bool     `json:"check_mount_point"`
+	} `json:"disks_config"`
+
+	StoreConfig     store.Config            `json:"store_config"`
+	RaftConfig      raft.Config             `json:"raft_config"`
+	ShardBaseConfig storage.ShardBaseConfig `json:"shard_base_config"`
+	NodeConfig      cmapi.ShardNodeInfo     `json:"node_config"`
+
+	AllocBidConfig               allocator.BlobConfig `json:"alloc_bid_config"`
+	AllocVolConfig               allocator.VolConfig  `json:"alloc_vol_config"`
+	HandleIOError                func(ctx context.Context)
+	HeartBeatIntervalS           int64 `json:"heart_beat_interval_s"`
+	ReportIntervalS              int64 `json:"report_interval_s"`
+	RouteUpdateIntervalS         int64 `json:"route_update_interval_s"`
+	CheckPointIntervalM          int64 `json:"check_point_interval_m"`
+	WaitRepairCloseDiskIntervalS int64 `json:"wait_repair_close_disk_interval_s"`
+	WaitReOpenDiskIntervalS      int64 `json:"wait_re_open_disk_interval_s"`
+	ShardCheckAndClearIntervalH  int64 `json:"shard_check_and_clear_interval_h"`
+	DiskMetricReportIntervalS    int64 `json:"disk_metric_report_interval_s"`
+
+	DeleteBlobCfg  message.MessageCfg `json:"blob_delete_cfg"`
+	ScClientConfig scheduler.Config   `json:"sc_client_config"`
+	SliceRepairCfg message.MessageCfg `json:"slice_repair_cfg"`
+
+	MetaStatsConfig          storage.MetaStatsConfig `json:"meta_stats_config"`
+	TransportUpdateIntervalM int64                   `json:"transport_update_interval_m"`
+}
+
+// newService returns the singleton service instance
+func newService(cfg *Config) *service {
+	serviceOnce.Do(func() {
+		globalService = createService(cfg)
+	})
+	return globalService
+}
+
+// createService creates a new service instance
+func createService(cfg *Config) *service {
+	span, ctx := trace.StartSpanFromContext(context.Background(), "NewShardNodeService")
+
+	security.InitWithRegionMagic(cfg.RegionMagic)
+	initServiceConfig(cfg)
+	cmClient := cmapi.New(&cfg.CmConfig)
+	if err := cmapi.LoadExtendCodemode(context.Background(), cmClient); err != nil {
+		span.Fatalf("load extend codemod failed: %s", err)
+	}
+
+	snClient := shardnodeapi.New(rpc2.Client{RetryOn: func(err error) bool {
+		return rpc2.DetectStatusCode(err) < apierr.CodeShardNodeNotLeader
+	}})
+	transport := base.NewTransport(base.TransportConfig{
+		CMClient:        cmClient,
+		SNClient:        snClient,
+		BNClient:        bnapi.New(&bnapi.Config{}),
+		Self:            &cfg.NodeConfig,
+		UpdateIntervalM: cfg.TransportUpdateIntervalM,
+	})
+	cfg.ShardBaseConfig.Transport = transport
+
+	// set raft config
+	resolver := &storage.AddressResolver{Transport: transport}
+	cfg.RaftConfig.TransportConfig.Resolver = resolver
+	cfg.RaftConfig.Transport = raft.NewTransport(&cfg.RaftConfig.TransportConfig)
+
+	// register node
+	if err := transport.Register(ctx); err != nil {
+		span.Fatalf("register shard server failed: %s", err)
+	}
+
+	// init components for shard meta stats record
+	cfg.ShardBaseConfig.KeyDecoder = catalog.NewKeyDecoder()
+	cfg.ShardBaseConfig.MetaStatsConfig = cfg.MetaStatsConfig
+
+	svr := &service{
+		cfg:       *cfg,
+		transport: transport,
+		taskPool:  taskpool.New(defaultTaskPoolSize, defaultTaskPoolSize),
+		closer:    closer.New(),
+		disks:     make(map[proto.DiskID]*storage.Disk),
+
+		shardMetaStatusReporter: base.NewShardMetaStatsReporter(cfg.NodeConfig.ClusterID),
+		shardRaftStatusReporter: base.NewRaftStatsReporter(cfg.NodeConfig.ClusterID),
+		diskRocksdbReporter:     base.NewDiskRocksdbStatusReporter(cfg.NodeConfig.ClusterID),
+		diskHealthReporter:      base.NewDiskHealthReporter(cfg.NodeConfig.ClusterID),
+	}
+
+	// load disks
+	err := svr.initDisks(ctx)
+	if err != nil {
+		span.Fatalf("init shard node disks failed: %s", err)
+	}
+
+	shards := make([]storage.ShardHandler, 0)
+	shardReports := make([]cmapi.ShardUnitInfo, 0)
+
+	/* do shardReport here to sync route version to avoid
+	shard load old route version from storage because shard info
+	did not sync, which may cause client get old route version by shard stat api */
+	if err = svr.shardReports(ctx, shards, shardReports, true, proto.ShardTaskTypeSyncRouteVersion); err != nil {
+		span.Fatalf("sync shard node route failed: %s", err)
+	}
+
+	c := catalog.NewCatalog(ctx, &catalog.Config{
+		ClusterID:   cfg.NodeConfig.ClusterID,
+		Transport:   transport,
+		ShardGetter: svr,
+		BlobConfig:  cfg.AllocBidConfig,
+		VolConfig:   cfg.AllocVolConfig,
+	})
+	svr.catalog = c
+
+	taskSwitchMgr := taskswitch.NewSwitchMgr(cmClient)
+	volCache := base.NewVolumeCache(transport, 10*time.Second)
+
+	cfg.DeleteBlobCfg.ClusterID = cfg.NodeConfig.ClusterID
+	blboDeleteMgr, err := message.NewBlobDeleteMgr(&message.BlobDelMgrConfig{
+		TaskSwitchMgr: taskSwitchMgr,
+		ShardGetter:   svr,
+		BlobTransport: transport,
+		VolCache:      volCache,
+		MessageCfg:    cfg.DeleteBlobCfg,
+	})
+	if err != nil {
+		span.Fatalf("new blob delete mgr failed, err: %s", err.Error())
+	}
+	svr.blobDelMgr = blboDeleteMgr
+
+	cfg.SliceRepairCfg.ClusterID = cfg.NodeConfig.ClusterID
+	sliceRepairMgr, err := message.NewSliceRepairMgr(&message.SliceRepairMgrConfig{
+		MessageMgrConfig: &message.MessageMgrConfig{
+			TaskSwitchMgr: taskSwitchMgr,
+			ShardGetter:   svr,
+			BlobTransport: transport,
+			VolCache:      volCache,
+			MessageCfg:    cfg.SliceRepairCfg,
+		},
+		BlobNodeSelector: selector.MakeSelector(60*1000, func() (hosts []string, err error) {
+			return transport.GetService(context.Background(), proto.ServiceNameWorker)
+		}),
+		SCClient: scheduler.New(&cfg.ScClientConfig, cmClient, cfg.NodeConfig.ClusterID),
+	})
+	if err != nil {
+		span.Fatalf("new slice repair mgr failed, err: %s", err.Error())
+	}
+	svr.sliceRepairMgr = sliceRepairMgr
+
+	go svr.loop(ctx)
+	span.Infof("service started success")
+
+	return svr
+}
+
+type service struct {
+	catalog   *catalog.Catalog
+	disks     map[proto.DiskID]*storage.Disk
+	transport base.Transport
+	taskPool  taskpool.TaskPool
+	groupRun  singleflight.Group
+
+	blobDelMgr     *message.BlobDeleteMgr
+	sliceRepairMgr *message.SliceRepairMgr
+
+	diskRocksdbReporter     *base.DiskRocksdbStatsReporter
+	diskHealthReporter      *base.DiskHealthReporter
+	shardMetaStatusReporter *base.ShardMetaStatsReporter
+	shardRaftStatusReporter *base.ShardRaftStatsReporter
+
+	cfg    Config
+	lock   sync.RWMutex
+	closer closer.Closer
+}
+
+func (s *service) getDisk(diskID proto.DiskID) (*storage.Disk, error) {
+	s.lock.RLock()
+	disk := s.disks[diskID]
+	s.lock.RUnlock()
+	if disk == nil {
+		return nil, apierr.ErrShardNodeDiskNotFound
+	}
+	return disk, nil
+}
+
+func (s *service) addDisk(disk *storage.Disk) {
+	s.lock.Lock()
+	s.disks[disk.DiskID()] = disk
+	s.lock.Unlock()
+}
+
+func (s *service) getAllDisks() []*storage.Disk {
+	s.lock.RLock()
+	disks := make([]*storage.Disk, 0, len(s.disks))
+	for i := range s.disks {
+		disks = append(disks, s.disks[i])
+	}
+	s.lock.RUnlock()
+
+	return disks
+}
+
+func (s *service) close() {
+	s.closer.Close()
+	s.blobDelMgr.Close()
+	s.sliceRepairMgr.Close()
+	s.cfg.RaftConfig.Transport.Close()
+	closer.Close(s.transport)
+}

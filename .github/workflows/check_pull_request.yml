@@ -1,0 +1,100 @@
+name: 'Pull Request Checker'
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  check-pr-title:
+    name: Check Pull Request Title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@e9fabac35e210fea40ca5b14c0da95a099eff26f # v5.4.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # feat(ui): Add `Button` component
+          # ^    ^    ^
+          # |    |    |__ Subject
+          # |    |_______ Scope
+          # |____________ Type
+
+          # Default: https://github.com/commitizen/conventional-commit-types
+          # types: |
+          #   fix
+
+          # Configure which scopes are allowed (newline-delimited).
+          # These are regex patterns auto-wrapped in `^ $`.
+          scopes: |
+            [a-z]+
+          # Configure that a scope must always be provided.
+          requireScope: true
+
+          # If you're using a format for the PR title that differs from the traditional Conventional
+          # Commits spec, you can use these options to customize the parsing of the type, scope and
+          # subject. The `headerPattern` should contain a regex where the capturing groups in parentheses
+          # correspond to the parts listed in `headerPatternCorrespondence`.
+          # See: https://github.com/conventional-changelog/conventional-changelog/tree/master/packages/conventional-commits-parser#headerpattern
+          headerPattern: '^(\w*)(?:\((.*?)\))?: (.*)$'
+          headerPatternCorrespondence: type, scope, subject
+
+  check-commit-message:
+    name: Check Commit Message
+    runs-on: ubuntu-latest
+    env:
+      JOB_COMMIT_FILE: '/tmp/commits.json'
+    steps:
+      - name: Get PR Commits
+        id: 'get-pr-commits'
+        uses: sejust/get-pr-commits@21ca1696fc716fa9423291cddc3d7a82668cfbc2 # v1.3.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          output-file: ${{ env.JOB_COMMIT_FILE }}
+
+      - name: Check Title
+        uses: sejust/commit-message-checker-with-regex@5bedef5c21ee29bb438572bdb715ad65159264f8 # v0.3.3
+        with:
+          commits: ${{ env.JOB_COMMIT_FILE }}
+          pattern: '^[a-z]+\([a-z0-9_\-\.]+\): .+\n(\n.*)*$'
+          error: 'Title likes `<type>(<scope>): <subject>`'
+
+      - name: Check Title Space
+        uses: sejust/commit-message-checker-with-regex@5bedef5c21ee29bb438572bdb715ad65159264f8 # v0.3.3
+        with:
+          commits: ${{ env.JOB_COMMIT_FILE }}
+          pattern: '^[^ ]+(?: [^ ]+)*\n(\n.*)*$'
+          error: 'Title has consecutive spaces'
+
+      - name: Check Subject Line Length
+        uses: sejust/commit-message-checker-with-regex@5bedef5c21ee29bb438572bdb715ad65159264f8 # v0.3.3
+        with:
+          commits: ${{ env.JOB_COMMIT_FILE }}
+          pattern: '^.{0,100}\n(\n.*)*$'
+          error: 'Subject too long (max 100)'
+
+      - name: Check Body Line Length
+        uses: sejust/commit-message-checker-with-regex@5bedef5c21ee29bb438572bdb715ad65159264f8 # v0.3.3
+        with:
+          commits: ${{ env.JOB_COMMIT_FILE }}
+          pattern: '^.+\n(\n.{0,100})*$'
+          error: 'Body line too long (max 100)'
+
+      - name: Document
+        if: ${{ failure() }}
+        run: |
+          echo ": template of commit message"
+          echo "<type>(<scope>): <subject>"
+          echo ""
+          echo "<body>"
+          echo ""
+          echo "close: #<issue_id>"
+          echo ""
+          echo "<footer>"
+          echo "Signed-off-by: <name> <email>"

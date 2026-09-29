@@ -1,0 +1,503 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package base
+
+import (
+	"context"
+	"strconv"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/singleflight"
+
+	api "github.com/cubefs/cubefs/blobstore/api/blobnode"
+	"github.com/cubefs/cubefs/blobstore/api/clustermgr"
+	shardnodeapi "github.com/cubefs/cubefs/blobstore/api/shardnode"
+	"github.com/cubefs/cubefs/blobstore/common/codemode"
+	"github.com/cubefs/cubefs/blobstore/common/proto"
+	"github.com/cubefs/cubefs/blobstore/common/trace"
+	snproto "github.com/cubefs/cubefs/blobstore/shardnode/proto"
+	"github.com/cubefs/cubefs/blobstore/util/closer"
+)
+
+type (
+	Transport interface {
+		GetConfig(ctx context.Context, key string) (string, error)
+		ShardReport(ctx context.Context, reports []clustermgr.ShardUnitInfo) ([]clustermgr.ShardTask, error)
+		GetRouteUpdate(ctx context.Context, routeVersion proto.RouteVersion) (proto.RouteVersion, []clustermgr.CatalogChangeItem, error)
+		GetService(ctx context.Context, name string) ([]string, error)
+		NodeTransport
+		SpaceTransport
+		AllocVolTransport
+		ShardTransport
+		BlobTransport
+		VolumeTransport
+	}
+
+	NodeTransport interface {
+		GetNode(ctx context.Context, nodeID proto.NodeID) (*clustermgr.ShardNodeInfo, error)
+		Register(ctx context.Context) error
+		GetMyself() *clustermgr.ShardNodeInfo
+		NodeID() proto.NodeID
+
+		GetDisk(ctx context.Context, diskID proto.DiskID, cache bool) (*clustermgr.ShardNodeDiskInfo, error)
+		AllocDiskID(ctx context.Context) (proto.DiskID, error)
+		RegisterDisk(ctx context.Context, disk *clustermgr.ShardNodeDiskInfo) error
+		SetDiskBroken(ctx context.Context, diskID proto.DiskID) error
+		ListDisks(ctx context.Context) ([]clustermgr.ShardNodeDiskInfo, error)
+		HeartbeatDisks(ctx context.Context, disks []clustermgr.ShardNodeDiskHeartbeatInfo) error
+	}
+
+	SpaceTransport interface {
+		GetSpace(ctx context.Context, sid proto.SpaceID) (*clustermgr.Space, error)
+		GetAllSpaces(ctx context.Context) ([]clustermgr.Space, error)
+	}
+
+	AllocVolTransport interface {
+		AllocBid(ctx context.Context, count uint64) (proto.BlobID, error)
+		AllocVolume(ctx context.Context, isInit bool, mode codemode.CodeMode, count int) (clustermgr.AllocatedVolumeInfos, error)
+		RetainVolume(ctx context.Context, tokens []string) (clustermgr.RetainVolumes, error)
+	}
+
+	ShardTransport interface {
+		ResolveRaftAddr(ctx context.Context, diskID proto.DiskID) (string, error)
+		ResolveNodeAddr(ctx context.Context, diskID proto.DiskID) (string, error)
+		UpdateShard(ctx context.Context, host string, args shardnodeapi.UpdateShardArgs) error
+		ShardStats(ctx context.Context, host string, args shardnodeapi.GetShardArgs) (shardnodeapi.ShardStats, error)
+		IsRepairedDisk(ctx context.Context, diskID proto.DiskID) (bool, error)
+	}
+
+	BlobTransport interface {
+		DeleteSliceUnit(ctx context.Context, info proto.VunitLocation, bid proto.BlobID) (err error)
+		MarkDeleteSliceUnit(ctx context.Context, info proto.VunitLocation, bid proto.BlobID) (err error)
+		RepairSlice(ctx context.Context, host string, volInfo *snproto.VolumeInfoSimple, repairMsg *snproto.SliceRepairMsg) (err error)
+		// request cm client
+		GetBlobnodeDiskInfo(ctx context.Context, diskID proto.DiskID) (*clustermgr.BlobNodeDiskInfo, error)
+	}
+
+	VolumeTransport interface {
+		ListVolume(ctx context.Context, marker proto.Vid, count int) (volInfo []*snproto.VolumeInfoSimple, retVid proto.Vid, err error)
+		GetVolumeInfo(ctx context.Context, vid proto.Vid) (ret *snproto.VolumeInfoSimple, err error)
+	}
+)
+
+type TransportConfig struct {
+	CMClient *clustermgr.Client
+	SNClient *shardnodeapi.Client
+	BNClient api.StorageAPI
+	Self     *clustermgr.ShardNodeInfo
+
+	UpdateIntervalM int64
+}
+
+func NewTransport(cfg TransportConfig) Transport {
+	t := &transport{
+		cmClient: cfg.CMClient,
+		snClient: cfg.SNClient,
+		bnClient: cfg.BNClient,
+		myself:   cfg.Self,
+
+		updateIntervalM: cfg.UpdateIntervalM,
+		Closer:          closer.New(),
+	}
+	go t.loopUpdateBlobnodeDisks()
+	return t
+}
+
+type transport struct {
+	myself   *clustermgr.ShardNodeInfo
+	allNodes sync.Map
+	allDisks sync.Map
+	cmClient *clustermgr.Client
+	snClient *shardnodeapi.Client
+	bnClient api.StorageAPI
+
+	repairedDisks sync.Map
+
+	// for blob task
+	updateIntervalM     int64
+	allBlobnodeDisks    sync.Map
+	brokenBlobnodeDisks sync.Map
+
+	singleRun singleflight.Group
+	closer.Closer
+}
+
+func (t *transport) GetNode(ctx context.Context, nodeID proto.NodeID) (*clustermgr.ShardNodeInfo, error) {
+	v, ok := t.allNodes.Load(nodeID)
+	if ok {
+		return v.(*clustermgr.ShardNodeInfo), nil
+	}
+
+	v, err, _ := t.singleRun.Do("node-"+strconv.Itoa(int(nodeID)), func() (interface{}, error) {
+		nodeInfo, err := t.cmClient.ShardNodeInfo(ctx, nodeID)
+		if err != nil {
+			return nil, err
+		}
+		t.allNodes.Store(nodeID, nodeInfo)
+		return nodeInfo, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return v.(*clustermgr.ShardNodeInfo), err
+}
+
+func (t *transport) GetDisk(ctx context.Context, diskID proto.DiskID, cache bool) (*clustermgr.ShardNodeDiskInfo, error) {
+	if cache {
+		v, ok := t.allDisks.Load(diskID)
+		if ok {
+			return v.(*clustermgr.ShardNodeDiskInfo), nil
+		}
+	}
+
+	v, err, _ := t.singleRun.Do("disk-"+strconv.Itoa(int(diskID)), func() (interface{}, error) {
+		diskInfo, err := t.cmClient.ShardNodeDiskInfo(ctx, diskID)
+		if err != nil {
+			return nil, err
+		}
+		t.allDisks.Store(diskID, diskInfo)
+		return diskInfo, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return v.(*clustermgr.ShardNodeDiskInfo), err
+}
+
+func (t *transport) IsRepairedDisk(ctx context.Context, diskID proto.DiskID) (bool, error) {
+	_, ok := t.repairedDisks.Load(diskID)
+	if ok {
+		return true, nil
+	}
+
+	diskInfo, err := t.cmClient.ShardNodeDiskInfo(ctx, diskID)
+	if err != nil {
+		return false, err
+	}
+	if diskInfo.Status != proto.DiskStatusRepaired {
+		return false, nil
+	}
+	t.repairedDisks.Store(diskID, struct{}{})
+	return true, nil
+}
+
+func (t *transport) AllocDiskID(ctx context.Context) (proto.DiskID, error) {
+	return t.cmClient.AllocShardNodeDiskID(ctx)
+}
+
+func (t *transport) RegisterDisk(ctx context.Context, disk *clustermgr.ShardNodeDiskInfo) error {
+	return t.cmClient.AddShardNodeDisk(ctx, disk)
+}
+
+func (t *transport) SetDiskBroken(ctx context.Context, diskID proto.DiskID) error {
+	return t.cmClient.SetShardNodeDisk(ctx, diskID, proto.DiskStatusBroken)
+}
+
+func (t *transport) Register(ctx context.Context) error {
+	nodeID, err := t.cmClient.AddShardNode(ctx, t.myself)
+	if err != nil {
+		return err
+	}
+
+	t.myself.NodeID = nodeID
+	return nil
+}
+
+func (t *transport) GetMyself() *clustermgr.ShardNodeInfo {
+	node := *t.myself
+	return &node
+}
+
+func (t *transport) GetSpace(ctx context.Context, sid proto.SpaceID) (*clustermgr.Space, error) {
+	v, err, _ := t.singleRun.Do("space-"+strconv.Itoa(int(sid)), func() (interface{}, error) {
+		space, err := t.cmClient.GetSpaceByID(ctx, &clustermgr.GetSpaceByIDArgs{SpaceID: sid})
+		if err != nil {
+			return nil, err
+		}
+		return space, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*clustermgr.Space), nil
+}
+
+func (t *transport) GetAllSpaces(ctx context.Context) ([]clustermgr.Space, error) {
+	args := &clustermgr.ListSpaceArgs{Count: uint32(10000)}
+	args.Count = uint32(10000)
+
+	spaces := make([]clustermgr.Space, 0)
+	for {
+		ret, err := t.cmClient.ListSpace(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		if len(ret.Spaces) < 1 {
+			break
+		}
+		for _, s := range ret.Spaces {
+			spaces = append(spaces, *s)
+		}
+		args.Marker = ret.Marker
+	}
+	return spaces, nil
+}
+
+func (t *transport) GetRouteUpdate(ctx context.Context, routeVersion proto.RouteVersion) (proto.RouteVersion, []clustermgr.CatalogChangeItem, error) {
+	resp, err := t.cmClient.GetCatalogChanges(ctx, &clustermgr.GetCatalogChangesArgs{RouteVersion: routeVersion, NodeID: t.myself.NodeID})
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.RouteVersion, resp.Items, nil
+}
+
+func (t *transport) ShardReport(ctx context.Context, reports []clustermgr.ShardUnitInfo) ([]clustermgr.ShardTask, error) {
+	resp, err := t.cmClient.ReportShard(ctx, &clustermgr.ShardReportArgs{
+		Shards: reports,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, err
+}
+
+func (t *transport) ListDisks(ctx context.Context) ([]clustermgr.ShardNodeDiskInfo, error) {
+	args := &clustermgr.ListOptionArgs{
+		Host:  t.myself.Host,
+		Count: 10000,
+	}
+	disks := make([]clustermgr.ShardNodeDiskInfo, 0)
+	for {
+		ret, err := t.cmClient.ListShardNodeDisk(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		if len(ret.Disks) < 1 {
+			break
+		}
+		for _, d := range ret.Disks {
+			disks = append(disks, *d)
+		}
+		args.Marker = ret.Marker
+	}
+	return disks, nil
+}
+
+func (t *transport) HeartbeatDisks(ctx context.Context, disks []clustermgr.ShardNodeDiskHeartbeatInfo) error {
+	return t.cmClient.HeartbeatShardNodeDisk(ctx, disks)
+}
+
+func (t *transport) NodeID() proto.NodeID {
+	return t.myself.NodeID
+}
+
+func (t *transport) GetConfig(ctx context.Context, key string) (string, error) {
+	return t.cmClient.GetConfig(ctx, key)
+}
+
+func (t *transport) GetService(ctx context.Context, name string) ([]string, error) {
+	nodes, err := t.cmClient.GetService(ctx, clustermgr.GetServiceArgs{Name: name})
+	if err != nil {
+		return nil, err
+	}
+	hosts := make([]string, 0, len(nodes.Nodes))
+	for _, node := range nodes.Nodes {
+		hosts = append(hosts, node.Host)
+	}
+	return hosts, nil
+}
+
+func (t *transport) AllocBid(ctx context.Context, count uint64) (proto.BlobID, error) {
+	ret, err := t.cmClient.AllocBid(ctx, &clustermgr.BidScopeArgs{Count: count})
+	if err != nil {
+		return proto.InValidBlobID, err
+	}
+	return ret.StartBid, nil
+}
+
+func (t *transport) AllocVolume(ctx context.Context, isInit bool, mode codemode.CodeMode, count int) (clustermgr.AllocatedVolumeInfos, error) {
+	args := &clustermgr.AllocVolumeArgs{
+		IsInit:   isInit,
+		CodeMode: mode,
+		Count:    count,
+	}
+	ret, err := t.cmClient.AllocVolume(ctx, args)
+	if err != nil {
+		return clustermgr.AllocatedVolumeInfos{}, err
+	}
+	return ret, nil
+}
+
+func (t *transport) RetainVolume(ctx context.Context, tokens []string) (clustermgr.RetainVolumes, error) {
+	return t.cmClient.RetainVolume(ctx, &clustermgr.RetainVolumeArgs{Tokens: tokens})
+}
+
+func (t *transport) ResolveRaftAddr(ctx context.Context, diskID proto.DiskID) (string, error) {
+	disk, err := t.GetDisk(ctx, diskID, true)
+	if err != nil {
+		return "", err
+	}
+	node, err := t.GetNode(ctx, disk.NodeID)
+	if err != nil {
+		return "", err
+	}
+	return node.RaftHost, nil
+}
+
+func (t *transport) ResolveNodeAddr(ctx context.Context, diskID proto.DiskID) (string, error) {
+	disk, err := t.GetDisk(ctx, diskID, true)
+	if err != nil {
+		return "", err
+	}
+	return disk.Host, nil
+}
+
+func (t *transport) UpdateShard(ctx context.Context, host string, args shardnodeapi.UpdateShardArgs) error {
+	return t.snClient.UpdateShard(ctx, host, args)
+}
+
+func (t *transport) ShardStats(ctx context.Context, host string, args shardnodeapi.GetShardArgs) (shardnodeapi.ShardStats, error) {
+	return t.snClient.GetShardStats(ctx, host, args)
+}
+
+func (t *transport) DeleteSliceUnit(ctx context.Context, info proto.VunitLocation, bid proto.BlobID) (err error) {
+	return t.bnClient.DeleteShard(ctx, info.Host, &api.DeleteShardArgs{
+		DiskID: info.DiskID,
+		Vuid:   info.Vuid,
+		Bid:    bid,
+	})
+}
+
+func (t *transport) MarkDeleteSliceUnit(ctx context.Context, info proto.VunitLocation, bid proto.BlobID) (err error) {
+	return t.bnClient.MarkDeleteShard(ctx, info.Host, &api.DeleteShardArgs{
+		DiskID: info.DiskID,
+		Vuid:   info.Vuid,
+		Bid:    bid,
+	})
+}
+
+func (t *transport) RepairSlice(ctx context.Context, host string, volInfo *snproto.VolumeInfoSimple, repairMsg *snproto.SliceRepairMsg) (err error) {
+	task := proto.ShardRepairTask{
+		Bid:      repairMsg.Bid,
+		CodeMode: volInfo.CodeMode,
+		Sources:  volInfo.VunitLocations,
+		BadIdxs:  sliceUint32ToInt(repairMsg.BadIdx),
+		Reason:   repairMsg.Reason,
+	}
+	return t.bnClient.RepairShard(ctx, host, &task)
+}
+
+func (t *transport) ListVolume(ctx context.Context, marker proto.Vid, count int) (volInfo []*snproto.VolumeInfoSimple, retVid proto.Vid, err error) {
+	vols, err := t.cmClient.ListVolume(ctx, &clustermgr.ListVolumeArgs{Marker: marker, Count: count})
+	if err != nil {
+		return
+	}
+	for index := range vols.Volumes {
+		ret := &snproto.VolumeInfoSimple{}
+		ret.Set(vols.Volumes[index])
+		volInfo = append(volInfo, ret)
+	}
+	retVid = vols.Marker
+	return
+}
+
+func (t *transport) GetVolumeInfo(ctx context.Context, vid proto.Vid) (ret *snproto.VolumeInfoSimple, err error) {
+	info, err := t.cmClient.GetVolumeInfo(ctx, &clustermgr.GetVolumeArgs{Vid: vid})
+	if err != nil {
+		return nil, err
+	}
+	ret = &snproto.VolumeInfoSimple{}
+	ret.Set(info)
+	return ret, nil
+}
+
+func (t *transport) GetBlobnodeDiskInfo(ctx context.Context, diskID proto.DiskID) (*clustermgr.BlobNodeDiskInfo, error) {
+	v, ok := t.allBlobnodeDisks.Load(diskID)
+	if ok {
+		return v.(*clustermgr.BlobNodeDiskInfo), nil
+	}
+	return t.getBlobnodeDiskInfo(ctx, diskID)
+}
+
+func (t *transport) getBlobnodeDiskInfo(ctx context.Context, diskID proto.DiskID) (*clustermgr.BlobNodeDiskInfo, error) {
+	v, err, _ := t.singleRun.Do("blobnode-disk-"+strconv.Itoa(int(diskID)), func() (interface{}, error) {
+		disk, err := t.cmClient.DiskInfo(ctx, diskID)
+		if err != nil {
+			return nil, err
+		}
+		t.allBlobnodeDisks.Store(diskID, disk)
+		if disk.Status == proto.DiskStatusBroken || disk.Status == proto.DiskStatusRepairing {
+			t.brokenBlobnodeDisks.Store(diskID, disk)
+		}
+		return disk, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*clustermgr.BlobNodeDiskInfo), nil
+}
+
+func (t *transport) loopUpdateBlobnodeDisks() {
+	_, ctx := trace.StartSpanFromContextWithTraceID(context.Background(), "", "transport.loopUpdateBlobnodeDisks")
+	ticker := time.NewTicker(time.Duration(t.updateIntervalM) * time.Minute)
+	defer ticker.Stop()
+
+	t.listBlobnodeDisks(ctx)
+	for {
+		select {
+		case <-ticker.C:
+			t.listBlobnodeDisks(ctx)
+		case <-t.Closer.Done():
+			return
+		}
+	}
+}
+
+func (t *transport) listBlobnodeDisks(ctx context.Context) {
+	span := trace.SpanFromContextSafe(ctx)
+	args1 := &clustermgr.ListOptionArgs{
+		Marker: proto.InvalidDiskID,
+		Count:  200,
+	}
+	for {
+		ret, err := t.cmClient.ListDisk(context.Background(), args1)
+		if err != nil {
+			span.Errorf("update blobnode disks failed: %s", err)
+			return
+		}
+		for _, disk := range ret.Disks {
+			t.allBlobnodeDisks.Store(disk.DiskID, disk)
+			if disk.Status == proto.DiskStatusBroken {
+				t.brokenBlobnodeDisks.Store(disk.DiskID, disk)
+			}
+		}
+		if ret.Marker == proto.InvalidDiskID {
+			return
+		}
+		args1.Marker = ret.Marker
+	}
+}
+
+func sliceUint32ToInt(s []uint32) []uint8 {
+	var ret []uint8
+	for _, e := range s {
+		ret = append(ret, uint8(e))
+	}
+	return ret
+}

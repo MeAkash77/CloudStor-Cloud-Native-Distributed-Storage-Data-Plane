@@ -1,0 +1,42 @@
+[
+  {
+    "label": "v3.2.1",
+    "value": "release-3.2.1"
+  },
+  {
+    "label": "v3.3.0",
+    "value": "release-3.3.0"
+  },
+  {
+    "label": "v3.3.1",
+    "value": "release-3.3.1"
+  },
+  {
+    "label": "v3.3.2",
+    "value": "release-3.3.2"
+  },
+  {
+    "label": "v3.4.0",
+    "value": "release-3.4.0"
+  },
+  {
+    "label": "v3.5.0",
+    "value": "release-3.5.0"
+  },
+  {
+    "label": "v3.5.1",
+    "value": "release-3.5.1"
+  },
+  {
+    "label": "v3.5.2",
+    "value": "release-3.5.2"
+  },
+  {
+    "label": "v3.5.3",
+    "value": "release-3.5.3"
+  },
+  {
+    "label": "v3.6.0",
+    "value": "release-3.6.0"
+  }
+]

@@ -1,0 +1,321 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package clustermgr
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"math/rand"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/cubefs/cubefs/blobstore/api/clustermgr"
+	"github.com/cubefs/cubefs/blobstore/clustermgr/cluster"
+	"github.com/cubefs/cubefs/blobstore/common/codemode"
+	"github.com/cubefs/cubefs/blobstore/common/proto"
+	"github.com/cubefs/cubefs/blobstore/common/raftserver"
+	"github.com/cubefs/cubefs/blobstore/common/rpc"
+	"github.com/cubefs/cubefs/blobstore/common/trace"
+	_ "github.com/cubefs/cubefs/blobstore/testing/nolog"
+)
+
+var testServiceCfg = &Config{
+	Region:    "test-region",
+	IDC:       []string{"z0", "z1", "z2"},
+	ClusterID: 1,
+	Readonly:  false,
+	DBPath:    os.TempDir() + "/svrdb-" + uuid.NewString() + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10),
+	VolumeCodeModePolicies: []codemode.Policy{
+		{
+			ModeName:  codemode.EC15P12.Name(),
+			MinSize:   1048577,
+			MaxSize:   1073741824,
+			SizeRatio: 0.8,
+			Enable:    true,
+		},
+		{
+			ModeName:  codemode.EC6P6.Name(),
+			MinSize:   0,
+			MaxSize:   1048576,
+			SizeRatio: 0.2,
+			Enable:    true,
+		},
+	},
+	VolumeCodeModeExtends: []codemode.ExtendCodeMode{{
+		CodeMode: 254,
+		Name:     "TestClusterMgrEC3P3L1",
+		Tactic:   codemode.Tactic{N: 3, M: 3, L: 1, AZCount: 1, PutQuorum: 5},
+	}},
+	ShardCodeModeName:        codemode.Replica3.Name(),
+	ClusterCfg:               map[string]interface{}{},
+	ClusterReportIntervalS:   1,
+	MetricReportIntervalM:    1,
+	HeartbeatNotifyIntervalS: 1,
+	ChunkSize:                17179869184,
+	RaftConfig: RaftConfig{
+		ServerConfig: raftserver.Config{
+			NodeId:       1,
+			ListenPort:   GetFreePort(),
+			TickInterval: 1,
+			ElectionTick: 2,
+			WalDir:       os.TempDir() + "/svrraftwal-" + uuid.NewString() + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10),
+			Members:      []raftserver.Member{{NodeID: 1, Host: "127.0.0.1:60110", Learner: false, Context: []byte(`{"node_host": "127.0.0.1:9998"}`)}},
+
+			TickIntervalMs: 20,
+		},
+	},
+	BlobNodeDiskMgrConfig: cluster.DiskMgrConfig{
+		RefreshIntervalS: 300,
+		RackAware:        false,
+		HostAware:        true,
+	},
+}
+
+var (
+	cleanWG sync.WaitGroup
+	newCtx  = func() context.Context {
+		_, ctx := trace.StartSpanFromContext(context.Background(), "")
+		return ctx
+	}
+)
+
+func TestMain(m *testing.M) {
+	exitCode := m.Run()
+	cleanWG.Wait()
+	os.Exit(exitCode)
+}
+
+func randID() string {
+	return fmt.Sprintf("%010d", rand.Intn(100000000))
+}
+
+func cleanTestService(testService *Service) {
+	testService.Close()
+	os.RemoveAll(testService.DBPath)
+	os.RemoveAll(testService.RaftConfig.ServerConfig.WalDir)
+}
+
+func initTestService(t testing.TB) (*Service, func()) {
+	cfg := *testServiceCfg
+
+	rand.Seed(time.Now().UnixNano())
+	cfg.DBPath = os.TempDir() + "/" + uuid.NewString() + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10)
+	cfg.NormalDBPath = cfg.DBPath + "/normaldb"
+	cfg.KvDBPath = cfg.DBPath + "/kvdb"
+	cfg.VolumeMgrConfig.VolumeDBPath = cfg.DBPath + "/volumedb"
+	cfg.RaftConfig.RaftDBPath = cfg.DBPath + "/raftdb"
+	cfg.RaftConfig.ServerConfig.WalDir = cfg.DBPath + "/raftwal"
+	cfg.RaftConfig.ServerConfig.ListenPort = GetFreePort()
+	cfg.RaftConfig.ServerConfig.Members = []raftserver.Member{
+		{NodeID: 1, Host: fmt.Sprintf("127.0.0.1:%d", GetFreePort()), Learner: false},
+	}
+	blobNodeCopySetConfs := make(map[proto.DiskType]cluster.CopySetConfig)
+	blobNodeHDDCopySetConf := blobNodeCopySetConfs[proto.DiskTypeHDD]
+	blobNodeHDDCopySetConf.NodeSetCap = 3
+	blobNodeHDDCopySetConf.DiskSetCap = 6
+	blobNodeCopySetConfs[proto.DiskTypeHDD] = blobNodeHDDCopySetConf
+	cfg.BlobNodeDiskMgrConfig.CopySetConfigs = blobNodeCopySetConfs
+
+	os.Mkdir(cfg.DBPath, 0o755)
+	testService, err := New(&cfg)
+	require.NoError(t, err)
+
+	cleanWG.Add(1)
+	return testService, func() {
+		go func() {
+			cleanTestService(testService)
+			cleanWG.Done()
+		}()
+	}
+}
+
+func initTestServiceWithShardNode(t testing.TB) (*Service, func()) {
+	cfg := *testServiceCfg
+
+	rand.Seed(time.Now().UnixNano())
+	cfg.DBPath = os.TempDir() + "/" + uuid.NewString() + strconv.FormatInt(rand.Int63n(math.MaxInt64), 10)
+	cfg.NormalDBPath = cfg.DBPath + "/normaldb"
+	cfg.KvDBPath = cfg.DBPath + "/kvdb"
+	cfg.VolumeMgrConfig.VolumeDBPath = cfg.DBPath + "/volumedb"
+	cfg.RaftConfig.RaftDBPath = cfg.DBPath + "/raftdb"
+	cfg.RaftConfig.ServerConfig.WalDir = cfg.DBPath + "/raftwal"
+	cfg.RaftConfig.ServerConfig.ListenPort = GetFreePort()
+	cfg.RaftConfig.ServerConfig.Members = []raftserver.Member{
+		{NodeID: 1, Host: fmt.Sprintf("127.0.0.1:%d", GetFreePort()), Learner: false},
+	}
+	blobNodeCopySetConfs := make(map[proto.DiskType]cluster.CopySetConfig)
+	blobNodeHDDCopySetConf := blobNodeCopySetConfs[proto.DiskTypeHDD]
+	blobNodeHDDCopySetConf.NodeSetCap = 3
+	blobNodeHDDCopySetConf.DiskSetCap = 6
+	blobNodeCopySetConfs[proto.DiskTypeHDD] = blobNodeHDDCopySetConf
+	cfg.BlobNodeDiskMgrConfig.CopySetConfigs = blobNodeCopySetConfs
+
+	cfg.ShardCodeModeName = codemode.Replica3.Name()
+	shardNodeCopySetConfs := make(map[proto.DiskType]cluster.CopySetConfig)
+	shardNodeNVMeCopySetConf := shardNodeCopySetConfs[proto.DiskTypeNVMeSSD]
+	shardNodeNVMeCopySetConf.NodeSetCap = 3
+	shardNodeNVMeCopySetConf.DiskSetCap = 6
+	shardNodeNVMeCopySetConf.DiskCountPerNodeInDiskSet = 6
+	shardNodeCopySetConfs[proto.DiskTypeNVMeSSD] = shardNodeNVMeCopySetConf
+	cfg.ShardNodeDiskMgrConfig.CopySetConfigs = shardNodeCopySetConfs
+
+	os.Mkdir(cfg.DBPath, 0o755)
+	testService, err := New(&cfg)
+	require.NoError(t, err)
+
+	cleanWG.Add(1)
+	return testService, func() {
+		go func() {
+			cleanTestService(testService)
+			cleanWG.Done()
+		}()
+	}
+}
+
+func initTestClusterClient(testService *Service) *clustermgr.Client {
+	ph := rpc.DefaultRouter.Router.PanicHandler
+	rpc.DefaultRouter = rpc.New()
+	rpc.DefaultRouter.Router.PanicHandler = ph
+	mux := NewHandler(testService)
+	server := httptest.NewServer(mux)
+	return clustermgr.New(&clustermgr.Config{
+		LbConfig: rpc.LbConfig{
+			Hosts: []string{server.URL},
+		},
+	})
+}
+
+func TestBidAlloc(t *testing.T) {
+	testService, clean := initTestService(t)
+	defer clean()
+	testClusterClient := initTestClusterClient(testService)
+	ctx := newCtx()
+
+	// test bid alloc
+	{
+		ret, err := testClusterClient.AllocBid(ctx, &clustermgr.BidScopeArgs{Count: 10})
+		require.NoError(t, err)
+		require.Equal(t, proto.BlobID(1), ret.StartBid)
+		require.Equal(t, proto.BlobID(10), ret.EndBid)
+
+		_, err = testClusterClient.AllocBid(ctx, &clustermgr.BidScopeArgs{Count: 100001})
+		require.Error(t, err)
+	}
+}
+
+type mockWriter struct{}
+
+func (mockWriter) Write(data []byte) (int, error) { return len(data), nil }
+func (mockWriter) Header() http.Header            { return http.Header{} }
+func (mockWriter) WriteHeader(statusCode int) {
+	// do nothing
+}
+
+func TestNewService(t *testing.T) {
+	cfg := *testServiceCfg
+
+	cfg.ClusterReportIntervalS = 0
+	cfg.MetricReportIntervalM = 0
+	cfg.HeartbeatNotifyIntervalS = 0
+
+	cfg.RaftConfig.ServerConfig.WalDir = "/tmp/tmpsvrraftwal-" + randID()
+	cfg.ClusterCfg[proto.VolumeReserveSizeKey] = "20000000"
+	os.Mkdir(cfg.DBPath, 0o755)
+
+	cfg.BlobNodeDiskMgrConfig.ReservedSpace = -1
+	cfg.ShardNodeDiskMgrConfig.ReservedSpace = 1 << 10
+
+	testService, err := New(&cfg)
+	require.NoError(t, err)
+	require.NotNil(t, testService)
+	require.Equal(t, int64(0), cfg.BlobNodeDiskMgrConfig.ReservedSpace)
+	require.Equal(t, int64(1<<10), cfg.ShardNodeDiskMgrConfig.ReservedSpace)
+
+	mc := testService.RaftConfig.ServerConfig.Members[0].Context
+	memberContext := &clustermgr.MemberContext{}
+	err = memberContext.Unmarshal(mc)
+	require.NoError(t, err)
+
+	testService.report(context.Background())
+	testService.metricReport(context.Background())
+
+	req, err := http.NewRequest(http.MethodPost, "/", nil)
+	require.NoError(t, err)
+
+	testService.forwardToLeader(mockWriter{}, req)
+
+	cleanTestService(testService)
+}
+
+func GetFreePort() int {
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	if err != nil {
+		return 0
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+func TestBrokenChunkNumReport(t *testing.T) {
+	testService, clean := initServiceWithData()
+	defer clean()
+
+	cmClient := initTestClusterClient(testService)
+	ctx := newCtx()
+	err := cmClient.SetDisk(ctx, 1, proto.DiskStatusBroken)
+	require.NoError(t, err)
+	err = cmClient.SetDisk(ctx, 2, proto.DiskStatusBroken)
+	require.NoError(t, err)
+	err = cmClient.SetDisk(ctx, 1, proto.DiskStatusRepairing)
+	require.NoError(t, err)
+
+	vids := testService.getBrokenVolumes(ctx, 0)
+	require.NotNil(t, vids)
+	testService.reportBrokenChunkNumInVolume(vids)
+}
+
+func TestBrokenShardUnitNumReport(t *testing.T) {
+	testService, clean := initServiceWithShardData()
+	defer clean()
+
+	cmClient := initTestClusterClient(testService)
+	ctx := newCtx()
+	err := cmClient.SetShardNodeDisk(ctx, 1, proto.DiskStatusBroken)
+	require.NoError(t, err)
+	err = cmClient.SetShardNodeDisk(ctx, 2, proto.DiskStatusBroken)
+	require.NoError(t, err)
+	err = cmClient.SetShardNodeDisk(ctx, 1, proto.DiskStatusRepairing)
+	require.NoError(t, err)
+
+	shards := testService.getBrokenShards(ctx, 0)
+	require.NotNil(t, shards)
+	testService.reportBrokenUnitNumInShard(shards)
+}

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<style id="cloudstor-ultra-upgrade">
+:root{
+  --bg:#020309;
+  --bg2:#050816;
+  --panel:rgba(10,15,30,.68);
+  --panel2:rgba(15,22,43,.78);
+  --line:rgba(145,170,255,.16);
+  --text:#f4f7ff;
+  --muted:#8f9bb8;
+  --cyan:#58e8ff;
+  --violet:#9b7cff;
+  --pink:#ff5fd2;
+  --green:#58ffb0;
+  --amber:#ffd166;
+}
+html{scroll-behavior:smooth}
+body{
+  background:
+    radial-gradient(1000px 700px at 8% 4%,rgba(88,232,255,.09),transparent 55%),
+    radial-gradient(900px 650px at 92% 12%,rgba(155,124,255,.12),transparent 55%),
+    radial-gradient(800px 700px at 50% 90%,rgba(255,95,210,.06),transparent 60%),
+    var(--bg)!important;
+  color:var(--text);
+  overflow-x:hidden;
+}
+body:before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;
+  background-image:
+    linear-gradient(rgba(120,150,255,.035) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(120,150,255,.035) 1px,transparent 1px);
+  background-size:72px 72px;
+  mask-image:linear-gradient(to bottom,black,transparent 92%);
+}
+body:after{
+  content:"";position:fixed;inset:-30%;pointer-events:none;z-index:-2;
+  background:conic-gradient(from 0deg,transparent 0 35%,rgba(88,232,255,.025),transparent 47% 68%,rgba(155,124,255,.025),transparent 80%);
+  animation:cloudstorAurora 18s linear infinite;
+}
+@keyframes cloudstorAurora{to{transform:rotate(360deg)}}
+*{box-sizing:border-box}
+section{position:relative}
+section:before{
+  content:"";position:absolute;top:0;left:7%;right:7%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(88,232,255,.3),rgba(155,124,255,.25),transparent);
+  opacity:.45;
+}
+button,a,.card,.panel,.feature,.stat,.node,.architecture-card{transition:transform .35s cubic-bezier(.2,.8,.2,1),box-shadow .35s,border-color .35s,background .35s}
+button:hover,a:hover{transform:translateY(-3px)}
+.card:hover,.panel:hover,.feature:hover,.stat:hover,.architecture-card:hover{
+  transform:translateY(-7px);
+  border-color:rgba(88,232,255,.35)!important;
+  box-shadow:0 22px 70px rgba(0,0,0,.38),0 0 50px rgba(88,232,255,.08);
+}
+.cloudstor-section-kicker{
+  display:inline-flex;align-items:center;gap:9px;padding:8px 13px;
+  border:1px solid rgba(88,232,255,.18);border-radius:999px;
+  background:rgba(88,232,255,.055);color:#a9efff;font-size:11px;
+  letter-spacing:.18em;text-transform:uppercase;font-weight:700;
+  box-shadow:inset 0 0 25px rgba(88,232,255,.025);
+}
+.cloudstor-section-kicker i{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 15px var(--cyan)}
+.cloudstor-big-title{
+  font-size:clamp(42px,6vw,92px);line-height:.92;letter-spacing:-.055em;
+  font-weight:850;max-width:1050px;
+  text-wrap:balance;
+}
+.cloudstor-gradient-text{
+  background:linear-gradient(100deg,#fff 0%,#a9f6ff 28%,#b39bff 65%,#ff9ce8 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  background-size:220% auto;animation:cloudstorGradient 7s ease-in-out infinite;
+}
+@keyframes cloudstorGradient{50%{background-position:100% 0}}
+.cloudstor-command-bar{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+  padding:10px 12px;border:1px solid var(--line);border-radius:18px;
+  background:rgba(4,7,17,.76);backdrop-filter:blur(20px);
+  box-shadow:0 20px 70px rgba(0,0,0,.35);
+}
+.cloudstor-command-bar span{font:600 11px ui-monospace,SFMono-Regular,Consolas,monospace;color:#8fa0c8}
+.cloudstor-chip{
+  padding:7px 10px;border:1px solid rgba(145,170,255,.14);border-radius:10px;
+  background:rgba(255,255,255,.025);font:600 10px ui-monospace,SFMono-Regular,Consolas,monospace;
+  color:#aebbe0;
+}
+.cloudstor-live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 14px var(--green);animation:cloudstorPulse 1.4s infinite}
+@keyframes cloudstorPulse{50%{transform:scale(1.65);opacity:.55}}
+.cloudstor-holo{
+  position:relative;overflow:hidden;border:1px solid rgba(145,170,255,.15);
+  background:linear-gradient(135deg,rgba(15,22,43,.82),rgba(5,8,18,.62));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 30px 100px rgba(0,0,0,.4);
+  backdrop-filter:blur(22px);
+}
+.cloudstor-holo:after{
+  content:"";position:absolute;inset:-150% -20%;
+  background:linear-gradient(105deg,transparent 45%,rgba(255,255,255,.045) 50%,transparent 55%);
+  transform:translateX(-35%);animation:cloudstorScan 8s linear infinite;pointer-events:none;
+}
+@keyframes cloudstorScan{to{transform:translateX(35%)}}
+.cloudstor-orbit{
+  position:absolute;border:1px solid rgba(88,232,255,.13);border-radius:50%;
+  transform:rotateX(68deg) rotateY(-12deg);animation:cloudstorOrbit 13s linear infinite;
+}
+.cloudstor-orbit.o1{inset:8%;}.cloudstor-orbit.o2{inset:18%;animation-duration:9s;animation-direction:reverse;border-color:rgba(155,124,255,.17)}
+.cloudstor-orbit.o3{inset:29%;animation-duration:16s;border-color:rgba(255,95,210,.12)}
+@keyframes cloudstorOrbit{to{transform:rotateX(68deg) rotateY(-12deg) rotateZ(360deg)}}
+.cloudstor-core{
+  position:absolute;left:50%;top:50%;width:160px;height:160px;transform:translate(-50%,-50%);
+  border-radius:30%;background:radial-gradient(circle at 35% 30%,#fff,rgba(88,232,255,.75) 13%,rgba(88,232,255,.16) 42%,transparent 70%);
+  filter:drop-shadow(0 0 45px rgba(88,232,255,.42));
+  animation:cloudstorCore 4s ease-in-out infinite;
+}
+@keyframes cloudstorCore{50%{transform:translate(-50%,-50%) scale(1.12) rotate(7deg);filter:drop-shadow(0 0 75px rgba(155,124,255,.5))}}
+.cloudstor-packet{
+  position:absolute;width:6px;height:6px;border-radius:50%;background:#b9f7ff;
+  box-shadow:0 0 18px #58e8ff,0 0 35px rgba(88,232,255,.5);
+  animation:cloudstorPacket var(--d,3.2s) linear infinite;
+}
+@keyframes cloudstorPacket{
+  0%{transform:translate3d(var(--x1),var(--y1),0) scale(.5);opacity:0}
+  12%{opacity:1}
+  88%{opacity:1}
+  100%{transform:translate3d(var(--x2),var(--y2),0) scale(1.4);opacity:0}
+}
+.cloudstor-metric{
+  padding:16px;border-radius:16px;border:1px solid rgba(145,170,255,.13);
+  background:rgba(255,255,255,.025);min-width:150px;
+}
+.cloudstor-metric small{display:block;color:#7e8aa8;text-transform:uppercase;letter-spacing:.12em;font-size:9px}
+.cloudstor-metric strong{display:block;margin-top:5px;font:750 24px ui-monospace,SFMono-Regular,Consolas,monospace}
+.cloudstor-terminal{
+  border:1px solid rgba(88,232,255,.17);border-radius:18px;background:#02050b;
+  box-shadow:0 25px 90px rgba(0,0,0,.45),inset 0 0 80px rgba(88,232,255,.025);
+  overflow:hidden;
+}
+.cloudstor-terminal-head{padding:11px 14px;border-bottom:1px solid rgba(145,170,255,.1);display:flex;gap:7px;align-items:center}
+.cloudstor-terminal-head b{width:8px;height:8px;border-radius:50%;background:#ff647f}.cloudstor-terminal-head b:nth-child(2){background:#ffd166}.cloudstor-terminal-head b:nth-child(3){background:#58ffb0}
+.cloudstor-terminal pre{margin:0;padding:22px;color:#a9f6ff;font:12px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;min-height:210px}
+.cloudstor-terminal .cmd{color:#fff}.cloudstor-terminal .ok{color:#58ffb0}.cloudstor-terminal .violet{color:#b39bff}
+.cloudstor-giant-demo{
+  min-height:720px;border-radius:34px;position:relative;overflow:hidden;
+  border:1px solid rgba(145,170,255,.16);
+  background:
+    radial-gradient(circle at 50% 50%,rgba(88,232,255,.09),transparent 30%),
+    radial-gradient(circle at 20% 80%,rgba(155,124,255,.08),transparent 28%),
+    #03060d;
+  box-shadow:0 50px 160px rgba(0,0,0,.52),inset 0 0 120px rgba(88,232,255,.025);
+}
+.cloudstor-demo-grid{
+  position:absolute;inset:0;background-image:linear-gradient(rgba(88,232,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(88,232,255,.045) 1px,transparent 1px);
+  background-size:52px 52px;transform:perspective(700px) rotateX(58deg) scale(1.8);transform-origin:center bottom;opacity:.35;
+}
+.cloudstor-demo-vignette{position:absolute;inset:0;background:radial-gradient(circle,transparent 20%,rgba(2,3,9,.08) 45%,rgba(2,3,9,.85) 100%);pointer-events:none}
+.cloudstor-statusbar{
+  display:flex;gap:9px;align-items:center;padding:10px 13px;border-radius:12px;
+  background:rgba(0,0,0,.42);border:1px solid rgba(145,170,255,.11);
+  font:600 10px ui-monospace,SFMono-Regular,Consolas,monospace;color:#8795b8;
+}
+.cloudstor-statusbar .healthy{color:#58ffb0}
+.cloudstor-big-number{font:800 clamp(34px,5vw,68px) ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:-.06em}
+@media(max-width:760px){
+  .cloudstor-big-title{font-size:44px}
+  .cloudstor-giant-demo{min-height:580px;border-radius:24px}
+  .cloudstor-core{width:100px;height:100px}
+}
+</style>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#03050b">
+<meta name="description" content="CloudStor — interactive distributed file and object storage visualization and simulator.">
+<title>CloudStor — Distributed Storage Control Plane</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<style>
+:root{--bg:#03050b;--panel:rgba(9,14,25,.76);--panel2:rgba(12,19,34,.9);--line:rgba(120,160,210,.17);--text:#eef6ff;--muted:#8ea2bc;--cyan:#62e9ff;--violet:#9b7cff;--green:#52f5a4;--red:#ff667d;--amber:#ffc86b;--shadow:0 24px 80px rgba(0,0,0,.45)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 70% 0%,rgba(67,79,180,.16),transparent 34%),radial-gradient(circle at 20% 30%,rgba(0,209,255,.08),transparent 28%),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-x:hidden}body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:56px 56px;mask-image:linear-gradient(to bottom,black,transparent 82%);z-index:-1}.container{width:min(1240px,calc(100% - 40px));margin:auto}.nav{position:fixed;top:0;left:0;right:0;height:72px;z-index:1000;background:rgba(3,5,11,.62);backdrop-filter:blur(18px);border-bottom:1px solid rgba(130,170,220,.1)}.navin{height:100%;display:flex;align-items:center;justify-content:space-between}.brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.03em}.brandmark{width:30px;height:30px;border:1px solid rgba(98,233,255,.7);border-radius:9px;position:relative;box-shadow:0 0 25px rgba(98,233,255,.2);transform:rotate(30deg)}.brandmark:after,.brandmark:before{content:"";position:absolute;inset:6px;border:1px solid rgba(155,124,255,.65);border-radius:5px}.brandmark:after{inset:10px;border-color:rgba(82,245,164,.55)}.navlinks{display:flex;gap:24px;align-items:center}.navlinks a{color:#9eb0c8;text-decoration:none;font-size:13px}.navlinks a:hover{color:#fff}.online{font-size:11px;letter-spacing:.14em;color:var(--green);border:1px solid rgba(82,245,164,.2);background:rgba(82,245,164,.05);padding:9px 12px;border-radius:999px}.online i{display:inline-block;width:6px;height:6px;background:var(--green);border-radius:50%;box-shadow:0 0 12px var(--green);margin-right:7px}.btn{border:0;color:#031017;background:linear-gradient(135deg,#74f0ff,#a98aff);padding:12px 18px;border-radius:12px;font-weight:800;cursor:pointer;box-shadow:0 10px 35px rgba(98,233,255,.18);transition:.25s;white-space:nowrap}.btn:hover{transform:translateY(-2px);box-shadow:0 15px 45px rgba(98,233,255,.28)}.btn.ghost{color:#dbe8f7;background:rgba(255,255,255,.035);border:1px solid rgba(160,190,230,.18);box-shadow:none}.btn.danger{background:linear-gradient(135deg,#ff7187,#9b7cff);color:#fff}.hero{min-height:100vh;padding-top:72px;position:relative;display:flex;align-items:center}.hero-grid{display:grid;grid-template-columns:1.02fr .98fr;align-items:center;gap:30px;min-height:calc(100vh - 72px)}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.24em;color:var(--cyan);margin-bottom:18px}.hero h1{font-size:clamp(58px,8vw,112px);line-height:.88;letter-spacing:-.075em;margin:0 0 25px;font-weight:900}.hero h1 span{display:block;background:linear-gradient(100deg,#fff 5%,#9defff 48%,#a98cff 95%);-webkit-background-clip:text;color:transparent}.hero p{max-width:620px;color:#9badc3;font-size:18px;line-height:1.7;margin:0 0 30px}.hero-actions{display:flex;gap:12px;flex-wrap:wrap}.metrics{display:flex;gap:28px;margin-top:42px}.metric strong{display:block;font-size:23px}.metric small{color:#71859e;font-size:11px;letter-spacing:.12em;text-transform:uppercase}.scene{height:650px;position:relative}.scene canvas{position:absolute;inset:0;width:100%;height:100%}.scene-ui{position:absolute;inset:0;pointer-events:none}.hud{position:absolute;padding:12px 14px;border:1px solid rgba(130,180,230,.15);background:rgba(4,9,17,.55);backdrop-filter:blur(12px);border-radius:13px;box-shadow:var(--shadow);font-size:11px;color:#9fb3ca}.hud b{color:#eef6ff}.hud.a{top:18%;right:2%}.hud.b{bottom:19%;left:3%}.hud.c{top:52%;right:0}.hud .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);margin-right:7px}.scrollcue{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);font-size:10px;color:#60748e;letter-spacing:.2em;text-transform:uppercase}.scrollcue:after{content:"";display:block;width:1px;height:40px;background:linear-gradient(var(--cyan),transparent);margin:9px auto 0}.section{padding:125px 0;position:relative}.section-head{display:flex;justify-content:space-between;align-items:end;gap:30px;margin-bottom:46px}.kicker{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--cyan);margin-bottom:10px}.section h2{font-size:clamp(38px,5vw,68px);line-height:.98;letter-spacing:-.06em;margin:0;max-width:780px}.section-intro{color:#8ea2bc;line-height:1.7;max-width:600px}.glass{background:linear-gradient(145deg,rgba(18,28,47,.76),rgba(5,9,18,.72));border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow);backdrop-filter:blur(20px)}.story{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.story-card{min-height:250px;padding:25px;position:relative;overflow:hidden;transition:.3s}.story-card:hover{transform:translateY(-8px);border-color:rgba(98,233,255,.3)}.story-num{font-size:12px;color:var(--cyan);letter-spacing:.16em}.story-card h3{font-size:21px;margin-top:90px;margin-bottom:10px}.story-card p{color:#8296ae;font-size:13px;line-height:1.6;margin:0}.story-card:after{content:"";position:absolute;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(98,233,255,.16),transparent 70%);right:-45px;bottom:-45px}.demo-wrap{padding:18px}.demo{min-height:690px;display:grid;grid-template-columns:1fr 310px;overflow:hidden}.demo-main{position:relative;min-height:690px;background:radial-gradient(circle at 50% 48%,rgba(72,90,190,.13),transparent 34%),#040811}.demo-canvas{position:absolute;inset:0}.demo-toolbar{position:absolute;top:18px;left:18px;right:18px;display:flex;align-items:center;justify-content:space-between;z-index:5}.demo-title{font-weight:800}.demo-sub{font-size:10px;color:#72869e;letter-spacing:.12em;text-transform:uppercase;margin-top:4px}.status{font-size:10px;color:var(--green);padding:8px 10px;border-radius:999px;background:rgba(82,245,164,.06);border:1px solid rgba(82,245,164,.18)}.demo-side{padding:22px;background:rgba(8,13,23,.95);border-left:1px solid var(--line);display:flex;flex-direction:column}.side-label{font-size:10px;color:#70849e;letter-spacing:.18em;text-transform:uppercase;margin:4px 0 12px}.control{padding:14px;border:1px solid rgba(140,170,210,.12);border-radius:14px;background:rgba(255,255,255,.025);margin-bottom:9px;cursor:pointer;transition:.2s}.control:hover{border-color:rgba(98,233,255,.32);background:rgba(98,233,255,.04)}.control strong{display:block;font-size:13px}.control span{font-size:11px;color:#71859d;line-height:1.45}.readout{margin-top:auto;border-top:1px solid var(--line);padding-top:17px}.readrow{display:flex;justify-content:space-between;font-size:11px;margin:11px 0;color:#8295ac}.readrow b{color:#eaf4ff}.progress{height:5px;background:#111c2d;border-radius:99px;overflow:hidden}.progress i{display:block;height:100%;width:var(--w,70%);background:linear-gradient(90deg,var(--cyan),var(--violet));box-shadow:0 0 14px rgba(98,233,255,.5)}.event-log{height:112px;overflow:hidden;margin-top:14px;padding:12px;border:1px solid rgba(120,160,210,.12);border-radius:12px;background:#030711;font:10px ui-monospace,monospace;color:#718ba5}.event-log div{margin-bottom:5px}.event-log .ok{color:var(--green)}.event-log .warn{color:var(--amber)}.event-log .err{color:var(--red)}.architecture{padding:35px;overflow:hidden;position:relative}.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center}.layer{padding:24px;border:1px solid rgba(140,175,220,.14);border-radius:18px;background:rgba(255,255,255,.025);position:relative}.layer h3{margin:0 0 7px}.layer p{margin:0;color:#8195ad;font-size:13px;line-height:1.6}.layer.full{grid-column:1/-1}.arch-arrow{position:absolute;left:50%;transform:translateX(-50%);color:#5f7894;font-size:22px}.protocols{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.proto{padding:28px;min-height:170px;position:relative;overflow:hidden}.proto strong{font-size:24px}.proto p{color:#8195ad;font-size:12px;line-height:1.55}.proto .wire{height:1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);position:absolute;bottom:0;left:-100%;right:-100%;animation:wire 4s linear infinite}@keyframes wire{from{transform:translateX(-30%)}to{transform:translateX(30%)}}.fault{display:grid;grid-template-columns:1fr 1fr;gap:18px}.fault-panel{padding:30px;min-height:340px}.node-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:25px}.node{width:80px;height:88px;border:1px solid rgba(120,170,220,.2);border-radius:14px;background:rgba(255,255,255,.025);display:flex;flex-direction:column;justify-content:center;align-items:center;transition:.35s}.node .lamp{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 14px var(--green);margin-bottom:9px}.node.off{opacity:.45;border-color:rgba(255,102,125,.35);transform:scale(.96)}.node.off .lamp{background:var(--red);box-shadow:0 0 15px var(--red)}.node small{font-size:9px;color:#7890aa}.timeline{margin-top:25px}.timeline-line{height:5px;background:#111d2e;border-radius:99px;position:relative;overflow:hidden}.timeline-line i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,var(--cyan),var(--violet));transition:1.2s}.timeline-labels{display:flex;justify-content:space-between;color:#647b96;font-size:9px;margin-top:8px}.scale{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}.chart{height:320px;padding:24px;position:relative;overflow:hidden}.bars{height:230px;display:flex;align-items:end;gap:12px;padding:20px 0 0}.bar{flex:1;min-width:18px;height:var(--h);background:linear-gradient(180deg,var(--cyan),rgba(98,233,255,.08));border-radius:8px 8px 2px 2px;box-shadow:0 0 25px rgba(98,233,255,.1);animation:barpulse 2.4s ease-in-out infinite alternate}@keyframes barpulse{to{filter:brightness(1.25);transform:scaleY(1.04);transform-origin:bottom}}.cloud{height:320px;padding:24px;display:flex;align-items:center;justify-content:center;position:relative}.cloud-orbit{width:230px;height:230px;border:1px dashed rgba(98,233,255,.2);border-radius:50%;position:relative;animation:spin 18s linear infinite}.cloud-orbit:before,.cloud-orbit:after{content:"";position:absolute;border:1px solid rgba(155,124,255,.18);border-radius:50%;inset:22px;transform:rotateX(70deg)}.cloud-orbit:after{inset:55px;transform:rotateY(70deg)}@keyframes spin{to{transform:rotate(360deg)}}.cloud-core{position:absolute;inset:75px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#b7f6ff,rgba(98,233,255,.22) 30%,rgba(155,124,255,.06) 65%,transparent 70%);box-shadow:0 0 80px rgba(98,233,255,.18)}.chip{position:absolute;padding:7px 10px;border-radius:99px;background:#091221;border:1px solid rgba(140,180,220,.16);font-size:9px;color:#9db2ca}.chip.a{top:18px;left:45%}.chip.b{right:2px;top:46%}.chip.c{bottom:15px;left:40%}.recruiter{display:grid;grid-template-columns:1fr 1fr;gap:14px}.rec{padding:28px;min-height:190px}.rec h3{margin:0 0 10px;font-size:21px}.rec p{color:#8296ad;line-height:1.65;font-size:13px;margin:0}.stack{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}.tag{padding:9px 12px;border:1px solid rgba(130,170,220,.15);background:rgba(255,255,255,.025);border-radius:999px;font-size:11px;color:#a9bbcf}.repo{display:grid;grid-template-columns:310px 1fr;gap:18px}.tree,.code{padding:24px;min-height:390px}.tree pre{margin:20px 0 0;color:#8ca2bb;font:12px/2 ui-monospace,SFMono-Regular,Consolas,monospace}.tree .hot{color:var(--cyan)}.code pre{margin:0;color:#8fa5bd;font:11px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}.code .kw{color:#b89dff}.code .fn{color:#66eaff}.code .str{color:#72f4a8}.footer{padding:60px 0 90px;border-top:1px solid var(--line);color:#657b95;font-size:12px}.footer strong{color:#dce9f6}.modal{position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(18px);z-index:2000;display:none;align-items:center;justify-content:center;padding:20px}.modal.show{display:flex}.modal-box{width:min(1200px,96vw);height:min(780px,92vh);background:#050913;border:1px solid rgba(130,180,230,.2);border-radius:24px;box-shadow:0 40px 120px rgba(0,0,0,.7);overflow:hidden;position:relative}.modal-head{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--line)}.modal-head small{color:#71869f}.close{width:34px;height:34px;border-radius:10px;border:1px solid var(--line);background:#0a1120;color:#b9cbe0;cursor:pointer}.modal-body{height:calc(100% - 62px);display:grid;grid-template-columns:1fr 290px}.modal-scene{position:relative}.modal-scene canvas{position:absolute;inset:0}.modal-side{padding:20px;border-left:1px solid var(--line);overflow:auto}.simstat{padding:13px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.02);margin-bottom:10px}.simstat label{display:block;color:#6e839d;font-size:9px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:7px}.simstat strong{font-size:20px}.toast{position:fixed;right:22px;bottom:22px;z-index:3000;padding:13px 16px;border-radius:13px;background:#0a1321;border:1px solid rgba(98,233,255,.22);color:#dcecff;box-shadow:var(--shadow);transform:translateY(20px);opacity:0;pointer-events:none;transition:.3s;font-size:12px}.toast.show{opacity:1;transform:translateY(0)}@media(max-width:980px){.navlinks{display:none}.hero-grid,.arch-grid,.fault,.scale,.repo,.demo,.modal-body{grid-template-columns:1fr}.scene{height:520px}.hero{padding-top:90px}.story{grid-template-columns:repeat(2,1fr)}.protocols{grid-template-columns:repeat(2,1fr)}.demo-side{border-left:0;border-top:1px solid var(--line)}.demo,.demo-main{min-height:600px}.modal-side{display:none}.modal-body{display:block}.modal-scene{height:100%}}@media(max-width:600px){.container{width:min(100% - 24px,1240px)}.hero h1{font-size:64px}.metrics{gap:14px;flex-wrap:wrap}.story,.protocols,.recruiter{grid-template-columns:1fr}.section{padding:90px 0}.scene{height:420px}.hud{display:none}.demo-wrap{padding:8px}.demo-main{min-height:520px}.section-head{display:block}.section-intro{margin-top:20px}.btn{padding:11px 14px}}
+</style>
+</head>
+<body>
+
+<section id="cloudstor-ultra-hero" style="min-height:100vh;display:grid;place-items:center;padding:120px 5vw 70px;position:relative;">
+  <div style="position:absolute;inset:0;overflow:hidden;pointer-events:none;">
+    <div style="position:absolute;width:55vw;height:55vw;left:-18vw;top:-18vw;border-radius:50%;background:radial-gradient(circle,rgba(88,232,255,.13),transparent 65%);filter:blur(25px);animation:cloudstorFloat 12s ease-in-out infinite;"></div>
+    <div style="position:absolute;width:50vw;height:50vw;right:-15vw;top:4vh;border-radius:50%;background:radial-gradient(circle,rgba(155,124,255,.14),transparent 65%);filter:blur(28px);animation:cloudstorFloat 15s ease-in-out infinite reverse;"></div>
+  </div>
+  <div style="width:min(1450px,100%);display:grid;grid-template-columns:1.02fr .98fr;gap:70px;align-items:center;position:relative;z-index:2;">
+    <div>
+      <div class="cloudstor-section-kicker"><i></i> DISTRIBUTED STORAGE / DATA PLANE</div>
+      <div style="height:22px"></div>
+      <h1 class="cloudstor-big-title">CloudStor<br><span class="cloudstor-gradient-text">turns infrastructure into a living data plane.</span></h1>
+      <p style="max-width:760px;color:#a2aec8;font-size:clamp(16px,1.6vw,21px);line-height:1.7;margin:28px 0 30px;">
+        A cinematic, interactive view of distributed storage: data enters once, travels through intelligent placement and protection layers, survives failures, and scales across a cloud-native cluster.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:30px;">
+        <button id="ultraLaunchDemo" style="border:0;border-radius:14px;padding:15px 20px;background:linear-gradient(110deg,#58e8ff,#9b7cff);color:#020309;font-weight:850;box-shadow:0 12px 40px rgba(88,232,255,.22);cursor:pointer;">▶ LAUNCH 3D LIVE LAB</button>
+        <a href="#architecture" style="display:inline-flex;align-items:center;border:1px solid rgba(145,170,255,.2);border-radius:14px;padding:15px 20px;color:#dce5ff;text-decoration:none;background:rgba(255,255,255,.03);">EXPLORE ARCHITECTURE ↓</a>
+      </div>
+      <div class="cloudstor-command-bar">
+        <span>$ cloudstor status</span><span class="cloudstor-chip"><b class="cloudstor-live-dot"></b> cluster healthy</span>
+        <span class="cloudstor-chip">nodes 06</span><span class="cloudstor-chip">replication 3x</span><span class="cloudstor-chip">data-plane active</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:20px;">
+        <div class="cloudstor-metric"><small>Active Nodes</small><strong id="ultraNodes">06</strong></div>
+        <div class="cloudstor-metric"><small>Protected Data</small><strong id="ultraProtected">99.99%</strong></div>
+        <div class="cloudstor-metric"><small>Requests / sec</small><strong id="ultraRps">18.4K</strong></div>
+      </div>
+    </div>
+    <div class="cloudstor-holo" style="height:min(650px,68vh);min-height:500px;border-radius:38px;perspective:1200px;">
+      <div class="cloudstor-orbit o1"></div><div class="cloudstor-orbit o2"></div><div class="cloudstor-orbit o3"></div>
+      <div class="cloudstor-core"></div>
+      <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;z-index:4;">
+        <div style="font:800 16px ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:.2em;color:#fff;">CLOUDSTOR</div>
+        <div style="font-size:10px;color:#7e8aa8;letter-spacing:.25em;margin-top:6px;">DATA PLANE CORE</div>
+      </div>
+      <div class="cloudstor-packet" style="--x1:-220px;--y1:210px;--x2:0px;--y2:0px;--d:2.8s"></div>
+      <div class="cloudstor-packet" style="--x1:260px;--y1:-170px;--x2:0px;--y2:0px;--d:3.4s;animation-delay:.8s"></div>
+      <div class="cloudstor-packet" style="--x1:-280px;--y1:-110px;--x2:0px;--y2:0px;--d:3.1s;animation-delay:1.3s"></div>
+      <div class="cloudstor-packet" style="--x1:0px;--y1:0px;--x2:260px;--y2:160px;--d:2.7s;animation-delay:.4s"></div>
+      <div class="cloudstor-packet" style="--x1:0px;--y1:0px;--x2:-280px;--y2:-150px;--d:3.8s;animation-delay:1.8s"></div>
+      <div style="position:absolute;left:6%;right:6%;bottom:6%;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+        <div class="cloudstor-statusbar"><span class="cloudstor-live-dot"></span> METADATA</div>
+        <div class="cloudstor-statusbar"><span class="cloudstor-live-dot"></span> STORAGE</div>
+        <div class="cloudstor-statusbar"><span class="cloudstor-live-dot"></span> OBJECT</div>
+      </div>
+    </div>
+  </div>
+</section>
+<style>@keyframes cloudstorFloat{50%{transform:translate3d(30px,35px,0) scale(1.06)}}</style>
+
+<section id="cloudstor-ultra-lab" style="padding:80px 5vw 120px;">
+  <div style="width:min(1450px,100%);margin:auto;">
+    <div style="display:flex;justify-content:space-between;gap:30px;align-items:end;flex-wrap:wrap;margin-bottom:28px;">
+      <div><div class="cloudstor-section-kicker"><i></i> INTERACTIVE INFRASTRUCTURE LAB</div>
+      <h2 style="font-size:clamp(38px,5vw,76px);letter-spacing:-.05em;line-height:.95;margin:18px 0 0;">Watch the <span class="cloudstor-gradient-text">data plane think.</span></h2></div>
+      <div class="cloudstor-command-bar"><span>SIMULATION</span><span class="cloudstor-chip"><span class="cloudstor-live-dot"></span> REAL-TIME</span></div>
+    </div>
+    <div class="cloudstor-giant-demo" id="ultraLab">
+      <div class="cloudstor-demo-grid"></div>
+      <div class="cloudstor-demo-vignette"></div>
+      <div style="position:absolute;left:28px;right:28px;top:24px;display:flex;justify-content:space-between;gap:12px;z-index:5;flex-wrap:wrap;">
+        <div class="cloudstor-statusbar">CLUSTER / <span class="healthy">HEALTHY</span></div>
+        <div class="cloudstor-statusbar">LATENCY <b id="ultraLatency">18.7 ms</b></div>
+      </div>
+      <div id="ultraNodesCanvas" style="position:absolute;inset:90px 40px 150px;z-index:2;"></div>
+      <div style="position:absolute;left:50%;top:48%;transform:translate(-50%,-50%);z-index:4;width:190px;height:190px;border-radius:32px;border:1px solid rgba(88,232,255,.32);background:radial-gradient(circle,rgba(88,232,255,.18),rgba(5,9,20,.85) 65%);box-shadow:0 0 80px rgba(88,232,255,.18),inset 0 0 50px rgba(88,232,255,.08);display:grid;place-items:center;text-align:center;">
+        <div><div style="font:800 20px ui-monospace,SFMono-Regular,Consolas,monospace;">CLOUDSTOR</div><small style="color:#8090b4;letter-spacing:.2em;">DATA PLANE</small><div id="ultraFlowState" style="margin-top:12px;color:#58ffb0;font:700 10px ui-monospace,SFMono-Regular,Consolas,monospace;">READY</div></div>
+      </div>
+      <div id="ultraLabPackets"></div>
+      <div style="position:absolute;left:28px;right:28px;bottom:25px;display:flex;justify-content:center;flex-wrap:wrap;gap:9px;z-index:6;">
+        <button class="ultraAction" data-action="upload">↑ Upload Data</button>
+        <button class="ultraAction" data-action="replicate">◈ Replicate</button>
+        <button class="ultraAction" data-action="failure">⚠ Fail Node</button>
+        <button class="ultraAction" data-action="recover">↻ Recover</button>
+        <button class="ultraAction" data-action="scale">＋ Scale Cluster</button>
+        <button class="ultraAction" data-action="reset">Reset Lab</button>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:15px;">
+      <div class="cloudstor-metric"><small>Storage Capacity</small><strong id="labCapacity">9.2 TB</strong></div>
+      <div class="cloudstor-metric"><small>Healthy Nodes</small><strong id="labHealthy">06 / 06</strong></div>
+      <div class="cloudstor-metric"><small>Protection</small><strong id="labProtection">3×</strong></div>
+      <div class="cloudstor-metric"><small>Data Flow</small><strong id="labFlow">IDLE</strong></div>
+    </div>
+  </div>
+</section>
+<style>
+.ultraAction{cursor:pointer;border:1px solid rgba(145,170,255,.18);background:rgba(4,7,16,.82);color:#dce5ff;padding:11px 14px;border-radius:12px;font:700 11px ui-monospace,SFMono-Regular,Consolas,monospace;backdrop-filter:blur(15px)}
+.ultraAction:hover{border-color:rgba(88,232,255,.5);color:#fff;box-shadow:0 0 25px rgba(88,232,255,.12)}
+.ultraNode{position:absolute;width:108px;height:108px;border-radius:24px;border:1px solid rgba(88,232,255,.24);background:linear-gradient(145deg,rgba(20,29,54,.9),rgba(4,8,17,.9));box-shadow:0 18px 55px rgba(0,0,0,.42),inset 0 0 30px rgba(88,232,255,.035);display:grid;place-items:center;text-align:center;animation:nodeFloat 4s ease-in-out infinite;transform-style:preserve-3d}
+.ultraNode.offline{border-color:rgba(255,95,210,.55);filter:grayscale(.7);opacity:.35;animation:none}
+.ultraNode .sphere{width:27px;height:27px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#58e8ff 25%,rgba(88,232,255,.08) 70%);box-shadow:0 0 28px rgba(88,232,255,.5);margin:auto}
+.ultraNode.offline .sphere{background:#ff5fd2;box-shadow:0 0 22px #ff5fd2}
+@keyframes nodeFloat{50%{transform:translateY(-8px) rotateY(4deg)}}
+.labPacket{position:absolute;width:7px;height:7px;border-radius:50%;background:#b9f7ff;box-shadow:0 0 16px #58e8ff,0 0 32px #58e8ff;z-index:5;pointer-events:none;animation:labTravel 1.25s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes labTravel{0%{left:50%;top:48%;transform:scale(.4);opacity:0}15%{opacity:1}100%{left:var(--tx);top:var(--ty);transform:scale(1.5);opacity:0}}
+@media(max-width:850px){.cloudstor-big-title{font-size:44px}#cloudstor-ultra-hero>div{grid-template-columns:1fr!important}.cloudstor-giant-demo{min-height:610px}.ultraNode{width:82px;height:82px;border-radius:18px}.ultraNode small{font-size:8px}.cloudstor-metric{min-width:120px}}
+</style>
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const lab=$("#ultraLab"), nodesCanvas=$("#ultraNodesCanvas"), packets=$("#ultraLabPackets");
+  if(!lab||!nodesCanvas)return;
+  let nodes=6, healthy=6, failed=false, replicated=false;
+  const positions=[
+    [7,20],[30,4],[63,4],[82,21],[70,65],[20,65],[46,78],[4,48],[87,52],[45,15]
+  ];
+  function renderNodes(){
+    nodesCanvas.innerHTML="";
+    for(let i=0;i<nodes;i++){
+      const n=document.createElement("div"); n.className="ultraNode"+(i===2&&failed?" offline":"");
+      const p=positions[i%positions.length]; n.style.left=p[0]+"%";n.style.top=p[1]+"%";n.style.animationDelay=(i*.25)+"s";
+      n.innerHTML='<div><div class="sphere"></div><div style="font:800 9px ui-monospace;margin-top:7px;color:#dce5ff">NODE-'+String(i+1).padStart(2,"0")+'</div><small style="color:#7180a3">'+(i===2&&failed?"OFFLINE":"ONLINE")+'</small></div>';
+      nodesCanvas.appendChild(n);
+    }
+  }
+  function packet(tx,ty){
+    const p=document.createElement("div");p.className="labPacket";p.style.setProperty("--tx",tx+"%");p.style.setProperty("--ty",ty+"%");
+    packets.appendChild(p);setTimeout(()=>p.remove(),1400);
+  }
+  function flow(type){
+    $("#ultraFlowState").textContent=type.toUpperCase();
+    $("#labFlow").textContent=type.toUpperCase();
+    for(let i=0;i<12;i++){const p=positions[i%Math.max(nodes,1)];setTimeout(()=>packet(p[0],p[1]),i*75)}
+    setTimeout(()=>{$("#ultraFlowState").textContent=failed?"RECOVERY ACTIVE":"READY";$("#labFlow").textContent=failed?"RECOVERING":"READY"},1200);
+  }
+  document.querySelectorAll(".ultraAction").forEach(btn=>btn.addEventListener("click",()=>{
+    const a=btn.dataset.action;
+    if(a==="upload"){flow("uploading");}
+    if(a==="replicate"){replicated=true;$("#labProtection").textContent="3×";flow("replicating")}
+    if(a==="failure"){failed=true;healthy=Math.max(0,nodes-1);renderNodes();$("#labHealthy").textContent=healthy+" / "+nodes;flow("rerouting")}
+    if(a==="recover"){failed=false;healthy=nodes;renderNodes();$("#labHealthy").textContent=healthy+" / "+nodes;flow("recovering")}
+    if(a==="scale"){nodes=Math.min(10,nodes+1);healthy=nodes;renderNodes();$("#labHealthy").textContent=healthy+" / "+nodes;$("#labCapacity").textContent=(9.2+(nodes-6)*1.8).toFixed(1)+" TB";flow("rebalancing")}
+    if(a==="reset"){nodes=6;healthy=6;failed=false;replicated=false;renderNodes();$("#labHealthy").textContent="06 / 06";$("#labCapacity").textContent="9.2 TB";$("#labProtection").textContent="3×";$("#labFlow").textContent="IDLE";$("#ultraFlowState").textContent="READY"}
+  }));
+  renderNodes();
+  $("#ultraLaunchDemo")?.addEventListener("click",()=>$("#cloudstor-ultra-lab")?.scrollIntoView({behavior:"smooth"}));
+  setInterval(()=>{
+    const base=18.7+(Math.random()*4-2);$("#ultraLatency").textContent=base.toFixed(1)+" ms";
+    $("#ultraRps").textContent=(17+Math.random()*3).toFixed(1)+"K";
+  },1400);
+})();
+</script>
+
+<nav class="nav"><div class="container navin"><a class="brand" href="#top" style="color:#fff;text-decoration:none"><span class="brandmark"></span>CloudStor</a><div class="navlinks"><a href="#story">Overview</a><a href="#demo">Live Demo</a><a href="#architecture">Architecture</a><a href="#engineering">Engineering</a><a href="#recruiter">Recruiter</a></div><div style="display:flex;gap:10px;align-items:center"><span class="online"><i></i>SYSTEM ONLINE</span><button class="btn" onclick="openDemo()">Launch Demo</button></div></div></nav>
+<main id="top">
+<section class="hero"><div class="container hero-grid"><div><div class="eyebrow">Cloud-native distributed storage</div><h1>Store.<span>Distribute.</span><span>Survive.</span></h1><p>CloudStor turns a collection of machines into one resilient storage layer — with file and object access, scalable metadata, replication, erasure coding, caching and multi-tenant infrastructure.</p><div class="hero-actions"><button class="btn" onclick="openDemo()">▶ Launch Live Simulator</button><a class="btn ghost" href="#architecture">Explore Architecture ↓</a></div><div class="metrics"><div class="metric"><strong>4+</strong><small>Access protocols</small></div><div class="metric"><strong>3</strong><small>Core node roles</small></div><div class="metric"><strong>∞</strong><small>Horizontal scale</small></div></div></div><div class="scene"><canvas id="heroCanvas"></canvas><div class="scene-ui"><div class="hud a"><span class="dot"></span><b>Cluster healthy</b><br>6 nodes • balanced</div><div class="hud b"><b>DATA FLOW</b><br>metadata → placement → storage</div><div class="hud c"><b>PROTECTION</b><br>replication / erasure coding</div></div></div></div><div class="scrollcue">scroll to enter the cluster</div></section>
+<section class="section" id="story"><div class="container"><div class="section-head"><div><div class="kicker">The idea</div><h2>One storage layer. Many machines. One simple experience.</h2></div><p class="section-intro">For a non-technical visitor, CloudStor can be understood as a smart storage system that decides where data should live, protects it, and keeps it available as the infrastructure grows or changes.</p></div><div class="story"><div class="story-card glass"><div class="story-num">01 / UPLOAD</div><h3>Give it a file.</h3><p>A user or application sends data through a supported access interface.</p></div><div class="story-card glass"><div class="story-num">02 / MAP</div><h3>Find its place.</h3><p>Metadata and placement logic coordinate where the data belongs in the cluster.</p></div><div class="story-card glass"><div class="story-num">03 / DISTRIBUTE</div><h3>Spread the load.</h3><p>Data is served by distributed storage resources rather than a single server.</p></div><div class="story-card glass"><div class="story-num">04 / PROTECT</div><h3>Keep it safe.</h3><p>Replication or erasure coding provides configurable data protection.</p></div><div class="story-card glass"><div class="story-num">05 / SERVE</div><h3>Read it back.</h3><p>Applications continue to access data through file or object-oriented interfaces.</p></div></div></div></section>
+<section class="section" id="demo"><div class="container"><div class="section-head"><div><div class="kicker">Interactive control plane</div><h2>See distributed storage working.</h2></div><p class="section-intro">This browser-only simulator mirrors the mental model of a CloudStor cluster. Upload data, create protection copies, take a node offline, recover it, or scale the cluster — no backend setup required.</p></div><div class="demo-wrap glass"><div class="demo"><div class="demo-main"><canvas class="demo-canvas" id="demoCanvas"></canvas><div class="demo-toolbar"><div><div class="demo-title">CloudStor Storage Lab</div><div class="demo-sub">interactive cluster simulation</div></div><div class="status"><i style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:6px"></i><span id="clusterStatus">HEALTHY</span></div></div></div><aside class="demo-side"><div class="side-label">Simulation controls</div><div class="control" onclick="simulateUpload()"><strong>01 · Upload file</strong><span>Send a 42.8 MB object into the cluster.</span></div><div class="control" onclick="simulateReplication()"><strong>02 · Replicate</strong><span>Visualize three protected copies.</span></div><div class="control" onclick="simulateFailure()"><strong>03 · Fail Node</strong><span>Take a storage node offline.</span></div><div class="control" onclick="simulateRecovery()"><strong>04 · Recover</strong><span>Rebalance and restore protection.</span></div><div class="control" onclick="simulateScale()"><strong>05 · Scale cluster</strong><span>Add two more storage nodes.</span></div><div class="control" onclick="resetSimulation()"><strong>↺ Reset</strong><span>Return to the initial state.</span></div><div class="readout"><div class="side-label">Live telemetry</div><div class="readrow"><span>Capacity</span><b id="capacity">5.8 TB</b></div><div class="progress"><i id="capacityBar" style="--w:58%"></i></div><div class="readrow"><span>Healthy nodes</span><b id="healthy">6 / 6</b></div><div class="readrow"><span>Protection</span><b id="protection">READY</b></div><div class="readrow"><span>Requests</span><b id="requests">12,842</b></div><div class="event-log" id="eventLog"><div class="ok">12:41:03  cluster health check → OK</div><div>12:41:04  placement map → synchronized</div><div>12:41:05  metadata quorum → healthy</div></div></div></aside></div></div></div></section>
+<section class="section" id="architecture"><div class="container"><div class="section-head"><div><div class="kicker">Architecture</div><h2>Follow one request through the system.</h2></div><p class="section-intro">CloudStor separates access, metadata coordination and data storage into distinct roles. The result is a system that can scale and evolve without forcing every workload onto one machine.</p></div><div class="architecture glass"><div class="arch-grid"><div class="layer full"><h3>Applications & workloads</h3><p>Databases • search systems • AI/ML pipelines • containers • analytics • user applications</p></div><div class="layer"><h3>Access layer</h3><p>POSIX, HDFS, S3 and CloudStor REST interfaces provide different ways to reach the same storage platform.</p></div><div class="layer"><h3>Control & metadata</h3><p>Master and metadata services coordinate volumes, partitions, placement and cluster state.</p></div><div class="layer"><h3>Data plane</h3><p>Datanodes persist and serve distributed data partitions across the storage fleet.</p></div><div class="layer"><h3>Object plane</h3><p>Objectnode provides object-storage semantics and integrates object-oriented workloads with the platform.</p></div><div class="layer full"><h3>Protection & infrastructure</h3><p>Replication • erasure coding • caching • recovery • multi-tenancy • datacenter / public cloud / hybrid-cloud deployments</p></div></div></div></div></section>
+<section class="section"><div class="container"><div class="section-head"><div><div class="kicker">Access anywhere</div><h2>Different interfaces. Same storage foundation.</h2></div><p class="section-intro">The project supports multiple access protocols, making the storage layer useful to both filesystem-oriented and object-oriented workloads.</p></div><div class="protocols"><div class="proto glass"><strong>POSIX</strong><p>Filesystem semantics for applications that expect directories, files and standard file operations.</p><div class="wire"></div></div><div class="proto glass"><strong>HDFS</strong><p>A familiar interface for workloads built around Hadoop-compatible filesystem access.</p><div class="wire"></div></div><div class="proto glass"><strong>S3</strong><p>Object-oriented access for cloud-native applications and data platforms.</p><div class="wire"></div></div><div class="proto glass"><strong>REST</strong><p>HTTP-based access for integrations and management workflows.</p><div class="wire"></div></div></div></div></section>
+<section class="section"><div class="container"><div class="section-head"><div><div class="kicker">Failure is a feature to design for</div><h2>Break a node. Watch the cluster respond.</h2></div><p class="section-intro">The simulator makes reliability tangible: a node can disappear while the rest of the system keeps operating and protection is restored through recovery.</p></div><div class="fault"><div class="fault-panel glass"><div class="kicker">Storage fleet</div><h3 id="faultTitle">6 healthy storage nodes</h3><div class="node-row" id="nodeRow"></div><button class="btn danger" style="margin-top:25px" onclick="simulateFailure()">Simulate node failure</button></div><div class="fault-panel glass"><div class="kicker">Recovery timeline</div><h3 id="recoveryTitle">Protection intact</h3><p id="recoveryText" style="color:#8296ad;line-height:1.6;font-size:13px">Data remains available while the simulator reroutes traffic and prepares the cluster for recovery.</p><div class="timeline"><div class="timeline-line"><i id="recoveryLine"></i></div><div class="timeline-labels"><span>Failure</span><span>Reroute</span><span>Repair</span><span>Healthy</span></div></div><button class="btn" style="margin-top:25px" onclick="simulateRecovery()">Start recovery</button></div></div></div></section>
+<section class="section"><div class="container"><div class="section-head"><div><div class="kicker">Elastic infrastructure</div><h2>Add capacity without changing the story.</h2></div><p class="section-intro">The visualization below turns horizontal scaling into something you can see: new capacity appears as new nodes join the storage plane.</p></div><div class="scale"><div class="chart glass"><div class="kicker">Storage nodes</div><h3 id="scaleCount">6 → 8 nodes</h3><div class="bars" id="bars"></div></div><div class="cloud glass"><div class="cloud-orbit"><div class="cloud-core"></div><span class="chip a">DATA</span><span class="chip b">META</span><span class="chip c">CACHE</span></div></div></div></div></section>
+<section class="section" id="engineering"><div class="container"><div class="section-head"><div><div class="kicker">Engineering depth</div><h2>Built around distributed-systems problems.</h2></div><p class="section-intro">The repository is not a CRUD application. Its architecture is centered on storage, metadata, coordination, data movement, recovery and operational tooling.</p></div><div class="recruiter"><div class="rec glass"><h3>Consistency & metadata</h3><p>Highly scalable metadata coordination gives the system a control plane for volumes, partitions and placement decisions.</p><div class="stack"><span class="tag">Metadata</span><span class="tag">Partitioning</span><span class="tag">Raft</span><span class="tag">Coordination</span></div></div><div class="rec glass"><h3>Data protection</h3><p>Choose between performance-oriented replication and storage-efficient erasure coding depending on workload and economics.</p><div class="stack"><span class="tag">Replication</span><span class="tag">Erasure Coding</span><span class="tag">Rebuild</span><span class="tag">Recovery</span></div></div><div class="rec glass"><h3>Performance</h3><p>Storage paths account for large and small files as well as sequential and random write patterns, with caching for selected workloads.</p><div class="stack"><span class="tag">Caching</span><span class="tag">IO paths</span><span class="tag">Large files</span><span class="tag">Small files</span></div></div><div class="rec glass"><h3>Cloud & tenancy</h3><p>Multi-tenancy and hybrid-cloud capabilities make the storage layer suitable for shared infrastructure and cloud-backed deployments.</p><div class="stack"><span class="tag">Multi-tenancy</span><span class="tag">Hybrid Cloud</span><span class="tag">Object Storage</span><span class="tag">Cloud Native</span></div></div></div></div></section>
+<section class="section"><div class="container"><div class="section-head"><div><div class="kicker">Repository anatomy</div><h2>See the real engineering surface.</h2></div><p class="section-intro">These are the major repository areas represented in the uploaded CloudStor source tree. The website uses them to explain the architecture without asking visitors to read thousands of files.</p></div><div class="repo"><div class="tree glass"><div class="kicker">Repository</div><pre><span class="hot">cloudstor/</span>
+├── client/
+├── master/
+├── metanode/
+├── datanode/
+├── objectnode/
+├── blobstore/
+├── raftstore/
+├── remotecache/
+├── proto/
+├── sdk/
+├── deploy/
+├── docs/
+└── util/</pre></div><div class="code glass"><div class="kicker">Mental model</div><pre><span class="kw">request</span> → <span class="fn">access protocol</span>
+          ↓
+      <span class="fn">metadata</span>
+          ↓
+   <span class="fn">placement / partition</span>
+          ↓
+  ┌───────┴────────┐
+  ↓                ↓
+<span class="str">replication</span>     <span class="str">erasure coding</span>
+  ↓                ↓
+  └───────┬────────┘
+          ↓
+   <span class="fn">distributed data</span>
+          ↓
+      <span class="kw">response</span>
+
+The browser simulator visualizes this flow.
+The source repository implements the underlying services,
+clients, APIs, storage engines, deployment tooling and
+operational components.</pre></div></div></div></section>
+<section class="section" id="recruiter"><div class="container"><div class="section-head"><div><div class="kicker">Recruiter view</div><h2>What this project demonstrates.</h2></div><p class="section-intro">A compact engineering summary for someone evaluating backend, distributed systems, storage, infrastructure or cloud-native engineering ability.</p></div><div class="recruiter"><div class="rec glass"><h3>Distributed systems</h3><p>Reasoning about data placement, metadata, partitions, replication, failure domains and recovery across machines.</p></div><div class="rec glass"><h3>Reliability engineering</h3><p>Designing for node and disk failures, repair workflows, redundancy and continued access to protected data.</p></div><div class="rec glass"><h3>Scalable infrastructure</h3><p>Separating control-plane responsibilities from data-plane responsibilities so the platform can grow with workload demand.</p></div><div class="rec glass"><h3>Production mindset</h3><p>Repository-level concerns include deployment, monitoring, APIs, SDKs, operational tools, testing and configuration — not only core algorithms.</p></div></div><div style="margin-top:25px;text-align:center"><button class="btn" onclick="openDemo()">Experience the architecture →</button></div></div></section>
+</main>
+<footer class="footer"><div class="container"><strong>CloudStor — Distributed Storage Control Plane</strong><br><br>Interactive portfolio visualization based on the uploaded CloudStor source repository. The simulator is intentionally client-side and educational; it does not claim to be a live production cluster.</div></footer>
+<div class="modal" id="demoModal"><div class="modal-box"><div class="modal-head"><div><strong>CloudStor Interactive Storage Lab</strong><br><small>Live browser simulation • distributed storage mental model</small></div><button class="close" onclick="closeDemo()">×</button></div><div class="modal-body"><div class="modal-scene"><canvas id="modalCanvas"></canvas></div><aside class="modal-side"><div class="kicker">Cluster telemetry</div><div class="simstat"><label>Cluster state</label><strong id="mState">HEALTHY</strong></div><div class="simstat"><label>Storage nodes</label><strong id="mNodes">6</strong></div><div class="simstat"><label>Data protection</label><strong id="mProtect">READY</strong></div><div class="simstat"><label>Active data</label><strong id="mData">0 MB</strong></div><div class="simstat"><label>Requests / sec</label><strong id="mReq">1,284</strong></div><div class="side-label" style="margin-top:20px">Actions</div><button class="btn" style="width:100%;margin-bottom:8px" onclick="simulateUpload()">Upload data</button><button class="btn ghost" style="width:100%;margin-bottom:8px" onclick="simulateFailure()">Fail node</button><button class="btn ghost" style="width:100%" onclick="simulateRecovery()">Recover cluster</button></aside></div></div></div>
+<div class="toast" id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);let state={nodes:6,healthy:6,uploaded:false,replicated:false,failed:false,scaled:false,requests:12842,activeMB:0};
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('show');clearTimeout(window.tt);window.tt=setTimeout(()=>e.classList.remove('show'),2600)}
+function log(t,c=''){const l=$('#eventLog');const d=document.createElement('div');d.className=c;d.textContent=new Date().toLocaleTimeString([], {hour12:false})+'  '+t;l.prepend(d);while(l.children.length>5)l.lastChild.remove()}
+function sync(){
+ $('#healthy').textContent=state.healthy+' / '+state.nodes;$('#capacity').textContent=(5.8+(state.nodes-6)*1.25).toFixed(1)+' TB';$('#capacityBar').style.setProperty('--w',Math.min(92,58+(state.nodes-6)*9)+'%');$('#protection').textContent=state.failed?'RECOVERING':state.replicated?'3× PROTECTED':'READY';$('#requests').textContent=(state.requests+Math.floor(Math.random()*1200)).toLocaleString();
+ $('#clusterStatus').textContent=state.failed?'DEGRADED':state.healthy===state.nodes?'HEALTHY':'RECOVERING';$('#mState').textContent=state.failed?'DEGRADED':state.healthy===state.nodes?'HEALTHY':'RECOVERING';$('#mNodes').textContent=state.nodes;$('#mProtect').textContent=state.failed?'REPAIRING':state.replicated?'3× PROTECTED':'READY';$('#mData').textContent=state.activeMB+' MB';$('#mReq').textContent=(1284+Math.floor(Math.random()*500)).toLocaleString();renderNodes();renderBars();}
+function simulateUpload(){state.uploaded=true;state.activeMB=43;state.requests+=420;log('upload project-video.mp4 → 42.8 MB','ok');toast('File entered the CloudStor data path');animatePackets('upload');sync()}
+function simulateReplication(){if(!state.uploaded){simulateUpload();setTimeout(simulateReplication,700);return}state.replicated=true;log('replication policy → 3 protected copies','ok');toast('Three protected copies are now visualized');animatePackets('replicate');sync()}
+function simulateFailure(){if(state.failed)return;state.failed=true;state.healthy=Math.max(1,state.nodes-1);log('storage node-03 → OFFLINE','err');log('traffic reroute → healthy nodes','warn');toast('Node failure simulated — traffic is rerouting');$('#recoveryLine').style.width='42%';$('#recoveryTitle').textContent='Traffic rerouted';$('#recoveryText').textContent='One storage node is unavailable. The simulator shows the cluster moving toward repair while data remains represented as available.';sync()}
+function simulateRecovery(){if(!state.failed){toast('Cluster is already healthy');return}log('repair workflow → started','warn');$('#recoveryLine').style.width='76%';setTimeout(()=>{state.failed=false;state.healthy=state.nodes;state.replicated=true;$('#recoveryLine').style.width='100%';$('#recoveryTitle').textContent='Protection restored';$('#recoveryText').textContent='The simulated repair completes and the storage fleet returns to a healthy state.';log('repair complete → protection restored','ok');toast('Recovery complete — cluster healthy');sync()},1000);sync()}
+function simulateScale(){if(state.scaled){toast('Cluster is already scaled to 8 nodes');return}state.scaled=true;state.nodes=8;state.healthy=8;log('scale-out → +2 storage nodes','ok');toast('Two new storage nodes joined the cluster');sync()}
+function resetSimulation(){state={nodes:6,healthy:6,uploaded:false,replicated:false,failed:false,scaled:false,requests:12842,activeMB:0};$('#recoveryLine').style.width='0';$('#recoveryTitle').textContent='Protection intact';$('#recoveryText').textContent='Data remains available while the simulator reroutes traffic and prepares the cluster for recovery.';log('cluster reset → healthy','ok');toast('Simulation reset');sync()}
+function renderNodes(){const r=$('#nodeRow');if(!r)return;r.innerHTML='';for(let i=1;i<=state.nodes;i++){const n=document.createElement('div');n.className='node '+(state.failed&&i===3?'off':'');n.innerHTML='<div class="lamp"></div><b>N-'+String(i).padStart(2,'0')+'</b><small>'+(state.failed&&i===3?'OFFLINE':'ONLINE')+'</small>';r.appendChild(n)}}
+function renderBars(){const b=$('#bars');if(!b)return;b.innerHTML='';for(let i=0;i<state.nodes;i++){const x=document.createElement('div');x.className='bar';x.style.setProperty('--h',(50+Math.random()*150)+'px');b.appendChild(x)}$('#scaleCount').textContent=state.nodes+' storage nodes';}
+
+let heroScene,heroCamera,heroRenderer,heroGroup=[],demoScene,demoCamera,demoRenderer,demoNodes=[],modalScene,modalCamera,modalRenderer,modalNodes=[];
+function makeScene(canvas,mode='hero'){const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(45,canvas.clientWidth/canvas.clientHeight,.1,1000);camera.position.set(0,1.8,9.5);const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(canvas.clientWidth,canvas.clientHeight,false);scene.add(new THREE.AmbientLight(0x91bfff,.7));const p=new THREE.PointLight(0x62e9ff,20,25);p.position.set(3,4,5);scene.add(p);const q=new THREE.PointLight(0x9b7cff,15,22);q.position.set(-4,-2,3);scene.add(q);return{scene,camera,renderer}}
+function nodeMesh(color=0x62e9ff){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.BoxGeometry(.72,.72,.72),new THREE.MeshStandardMaterial({color:0x0a1425,metalness:.75,roughness:.2,emissive:color,emissiveIntensity:.06}));g.add(body);const ring=new THREE.Mesh(new THREE.TorusGeometry(.55,.025,8,40),new THREE.MeshBasicMaterial({color}));g.add(ring);return g}
+function buildHero(){const canvas=$('#heroCanvas');const x=makeScene(canvas);heroScene=x.scene;heroCamera=x.camera;heroRenderer=x.renderer;const group=new THREE.Group();heroScene.add(group);const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.15,2),new THREE.MeshStandardMaterial({color:0x09182a,wireframe:true,emissive:0x62e9ff,emissiveIntensity:.22,transparent:true,opacity:.82}));group.add(core);const c2=new THREE.Mesh(new THREE.IcosahedronGeometry(.72,1),new THREE.MeshBasicMaterial({color:0x9b7cff,wireframe:true,transparent:true,opacity:.4}));group.add(c2);for(let i=0;i<6;i++){const n=nodeMesh(i%2?0x9b7cff:0x62e9ff);const a=i/6*Math.PI*2;n.position.set(Math.cos(a)*2.8,(i%2-.5)*.65,Math.sin(a)*2.8);n.userData.a=a;group.add(n);heroGroup.push(n);const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),n.position.clone()]),new THREE.LineBasicMaterial({color:0x62e9ff,transparent:true,opacity:.18}));group.add(line)}for(let i=0;i<80;i++){const s=new THREE.Mesh(new THREE.SphereGeometry(.012,6,6),new THREE.MeshBasicMaterial({color:i%3?0x62e9ff:0x9b7cff}));s.position.set((Math.random()-.5)*8,(Math.random()-.5)*6,(Math.random()-.5)*8);group.add(s)}group.rotation.x=.15;heroScene.userData.group=group;animateHero()}
+function animateHero(t=0){requestAnimationFrame(animateHero);const g=heroScene.userData.group;if(g){g.rotation.y=t*.00018;g.rotation.x=.16+Math.sin(t*.0005)*.05;heroGroup.forEach((n,i)=>{const a=n.userData.a+t*.00035;n.position.x=Math.cos(a)*2.8;n.position.z=Math.sin(a)*2.8;n.position.y=Math.sin(t*.001+i)*.35})}heroRenderer.render(heroScene,heroCamera);}
+function buildCluster(canvas,store='demo'){const x=makeScene(canvas);const scene=x.scene,camera=x.camera,renderer=x.renderer;camera.position.set(0,3.8,11.5);const group=new THREE.Group();scene.add(group);const core=new THREE.Mesh(new THREE.SphereGeometry(1.05,32,32),new THREE.MeshStandardMaterial({color:0x071525,emissive:0x62e9ff,emissiveIntensity:.24,metalness:.8,roughness:.15,transparent:true,opacity:.92}));group.add(core);const tor=new THREE.Mesh(new THREE.TorusGeometry(1.42,.035,8,64),new THREE.MeshBasicMaterial({color:0x62e9ff,transparent:true,opacity:.45}));tor.rotation.x=Math.PI/2;group.add(tor);const nodes=[];for(let i=0;i<8;i++){const n=nodeMesh(i===2?0xff667d:i%2?0x9b7cff:0x62e9ff);n.userData.base=i;n.position.set(Math.cos(i/8*Math.PI*2)*3.4,Math.sin(i*1.7)*.55,Math.sin(i/8*Math.PI*2)*3.4);group.add(n);nodes.push(n);const pts=[new THREE.Vector3(0,0,0),n.position.clone()];const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:i%2?0x9b7cff:0x62e9ff,transparent:true,opacity:.17}));group.add(line)}for(let i=0;i<120;i++){const p=new THREE.Mesh(new THREE.SphereGeometry(.014,5,5),new THREE.MeshBasicMaterial({color:i%4?0x62e9ff:0x9b7cff}));p.position.set((Math.random()-.5)*9,(Math.random()-.5)*5,(Math.random()-.5)*9);group.add(p)}scene.userData={group,nodes,packets:[],t:0};if(store==='demo'){demoScene=scene;demoCamera=camera;demoRenderer=renderer;demoNodes=nodes;animateCluster(scene,renderer,camera)}else{modalScene=scene;modalCamera=camera;modalRenderer=renderer;modalNodes=nodes;animateCluster(scene,renderer,camera)}}
+function animateCluster(scene,renderer,camera){scene.userData.t++;const g=scene.userData.group;g.rotation.y=.0008*scene.userData.t;g.rotation.x=.08+Math.sin(scene.userData.t*.012)*.035;scene.userData.nodes.forEach((n,i)=>{n.position.y=Math.sin(scene.userData.t*.015+i)*.3;n.rotation.x+=.008;n.rotation.y+=.01;n.scale.setScalar(1+Math.sin(scene.userData.t*.025+i)*.035);n.visible=i<state.nodes});renderer.render(scene,camera);requestAnimationFrame(()=>animateCluster(scene,renderer,camera))}
+function animatePackets(kind){const scene=demoScene||modalScene;if(!scene)return;const start=new THREE.Vector3(0,0,0);for(let i=0;i<(kind==='replicate'?8:5);i++){const target=(demoNodes||modalNodes)[i%(state.nodes||6)];if(!target)continue;const p=new THREE.Mesh(new THREE.SphereGeometry(.07,8,8),new THREE.MeshBasicMaterial({color:kind==='replicate'?0x9b7cff:0x62e9ff}));p.position.copy(start);scene.add(p);const to=target.position.clone();gsap.to(p.position,{x:to.x,y:to.y,z:to.z,duration:.65+i*.09,ease:'power2.in',onComplete:()=>{gsap.to(p.scale,{x:2,y:2,z:2,duration:.15,yoyo:true,repeat:1});setTimeout(()=>scene.remove(p),350)}})}}
+function resizeAll(){[heroRenderer,demoRenderer,modalRenderer].forEach((r,i)=>{if(!r)return;const c=r.domElement;const w=c.clientWidth,h=c.clientHeight;const cam=[heroCamera,demoCamera,modalCamera][i];if(cam){cam.aspect=w/h;cam.updateProjectionMatrix()}r.setSize(w,h,false)})}window.addEventListener('resize',resizeAll);
+function openDemo(){$('#demoModal').classList.add('show');document.body.style.overflow='hidden';setTimeout(()=>{if(!modalScene)buildCluster($('#modalCanvas'),'modal');resizeAll();sync()},50)}function closeDemo(){$('#demoModal').classList.remove('show');document.body.style.overflow=''}
+window.addEventListener('keydown',e=>{if(e.key==='Escape')closeDemo()});
+function init(){buildHero();buildCluster($('#demoCanvas'),'demo');renderNodes();renderBars();sync();setInterval(()=>{state.requests+=Math.floor(Math.random()*35);sync()},1800);gsap.registerPlugin(ScrollTrigger);gsap.utils.toArray('.story-card,.proto,.rec,.layer,.fault-panel,.chart,.cloud,.repo>*').forEach(el=>gsap.from(el,{y:35,opacity:0,duration:.8,ease:'power2.out',scrollTrigger:{trigger:el,start:'top 86%'}}))}
+init();
+</script>
+</body>
+</html>

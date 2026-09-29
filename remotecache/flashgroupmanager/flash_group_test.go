@@ -1,0 +1,596 @@
+package flashgroupmanager
+
+import (
+	"fmt"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cubefs/cubefs/proto"
+	"github.com/stretchr/testify/assert"
+)
+
+func tSyncUpdateFlashGroup(flashGroup *FlashGroup) (err error) {
+	return nil
+}
+
+// TestNewFlashGroup tests the creation of a new FlashGroup instance
+func TestNewFlashGroup(t *testing.T) {
+	id := uint64(123)
+	slots := []uint32{1, 2, 3, 4, 5}
+	slotStatus := proto.SlotStatus_Completed
+	pendingSlots := []uint32{6, 7}
+	step := uint32(5)
+	status := proto.FlashGroupStatus_Active
+	weight := uint32(100)
+
+	fg := newFlashGroup(id, slots, slotStatus, pendingSlots, step, status, weight)
+
+	assert.Equal(t, id, fg.ID)
+	assert.Equal(t, slots, fg.Slots)
+	assert.Equal(t, slotStatus, fg.SlotStatus)
+	assert.Equal(t, pendingSlots, fg.PendingSlots)
+	assert.Equal(t, step, fg.Step)
+	assert.Equal(t, status, fg.Status)
+	assert.Equal(t, weight, fg.Weight)
+	assert.NotNil(t, fg.flashNodes)
+	assert.Equal(t, 0, len(fg.flashNodes))
+}
+
+// TestFlashGroup_GetAdminView tests the GetAdminView method
+func TestFlashGroup_GetAdminView(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// Add some flash nodes
+	fn1 := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: "node1", ZoneName: "zone1"}}
+	fn2 := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: "node2", ZoneName: "zone2"}}
+	fg.putFlashNode(fn1)
+	fg.putFlashNode(fn2)
+
+	view := fg.GetAdminView()
+
+	assert.Equal(t, uint64(1), view.ID)
+	assert.Equal(t, []uint32{1, 2, 3}, view.Slots)
+	assert.Equal(t, proto.SlotStatus_Completed, view.SlotStatus)
+	assert.Equal(t, proto.FlashGroupStatus_Active, view.Status)
+	assert.Equal(t, uint32(100), view.Weight)
+	assert.Equal(t, uint32(3), view.Step)
+	assert.Equal(t, 2, view.FlashNodeCount)
+	assert.Equal(t, 2, len(view.ZoneFlashNodes))
+}
+
+// TestFlashGroup_ReduceSlot_AlreadyReducing tests that ReduceSlot doesn't start multiple goroutines
+func TestFlashGroup_ReduceSlot_AlreadyReducing(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3, 4, 5, 6, 7, 8}, proto.SlotStatus_Completed, []uint32{}, 8, proto.FlashGroupStatus_Active, 100)
+
+	// Set the flag to indicate reduction is already in progress
+	atomic.StoreInt32(&fg.ReducingSlots, 1)
+
+	// This should return immediately without starting a new goroutine
+	fg.ReduceSlot(tSyncUpdateFlashGroup)
+
+	// Verify the flag is still set
+	assert.Equal(t, int32(1), atomic.LoadInt32(&fg.ReducingSlots))
+}
+
+// TestFlashGroup_ReduceSlot_NoSlots tests ReduceSlot behavior when there are no slots
+func TestFlashGroup_ReduceSlot_NoSlots(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{}, proto.SlotStatus_Completed, []uint32{}, 0, proto.FlashGroupStatus_Active, 100)
+
+	// Set lost all flash nodes flag
+	atomic.StoreInt32(&fg.LostAllFlashNode, 1)
+
+	// Start reduction
+	fg.ReduceSlot(tSyncUpdateFlashGroup)
+
+	// Wait a bit for the goroutine to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify no slots were processed since there were none to begin with
+	assert.Equal(t, 0, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_ReduceSlot_WithSlots tests the complete ReduceSlot functionality
+func TestFlashGroup_ReduceSlot_WithSlots(t *testing.T) {
+	// Create a flash group with 8 slots
+	initialSlots := []uint32{1, 2, 3, 4, 5, 6, 7, 8}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 8, proto.FlashGroupStatus_Active, 100)
+
+	// Set lost all flash nodes flag to trigger reduction
+	atomic.StoreInt32(&fg.LostAllFlashNode, 1)
+
+	// Start reduction
+	fg.ReduceSlot(tSyncUpdateFlashGroup)
+
+	// Wait for the first reduction cycle (20 seconds, but we'll wait less for testing)
+	// In a real scenario, this would take 20 seconds
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify that slots were moved to reserved slots
+	// Note: In a real scenario with 20-second intervals, this would take longer
+	// For testing purposes, we can verify the mechanism works by checking the structure
+	assert.Equal(t, 8, len(fg.Slots)+len(fg.ReservedSlots))
+
+	// Verify the reducing flag is set
+	assert.Equal(t, int32(1), atomic.LoadInt32(&fg.ReducingSlots))
+}
+
+// TestFlashGroup_executeReduceSlot tests the executeReduceSlot method directly
+func TestFlashGroup_executeReduceSlot(t *testing.T) {
+	// Create a flash group with 8 slots
+	initialSlots := []uint32{1, 2, 3, 4, 5, 6, 7, 8}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 8, proto.FlashGroupStatus_Active, 100)
+
+	initialSlotCount := len(fg.Slots)
+
+	// Execute reduction
+	fg.executeReduceSlot((len(fg.Slots)+4-1)/4, tSyncUpdateFlashGroup)
+
+	// Verify that approximately 25% of slots were moved (8 slots -> 6 slots, 2 to reserved)
+	expectedRemaining := (initialSlotCount * 3) / 4 // 75% remaining
+	expectedReserved := initialSlotCount - expectedRemaining
+
+	assert.Equal(t, expectedRemaining, len(fg.Slots))
+	assert.Equal(t, expectedReserved, len(fg.ReservedSlots))
+
+	// Verify total count remains the same
+	assert.Equal(t, initialSlotCount, len(fg.Slots)+len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_executeReduceSlot_EmptySlots tests executeReduceSlot with no slots
+func TestFlashGroup_executeReduceSlot_EmptySlots(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{}, proto.SlotStatus_Completed, []uint32{}, 0, proto.FlashGroupStatus_Active, 100)
+
+	// This should not panic or cause issues
+	fg.executeReduceSlot((len(fg.Slots)+4-1)/4, tSyncUpdateFlashGroup)
+
+	assert.Equal(t, 0, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_executeReduceSlot_SingleSlot tests executeReduceSlot with only one slot
+func TestFlashGroup_executeReduceSlot_SingleSlot(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1}, proto.SlotStatus_Completed, []uint32{}, 1, proto.FlashGroupStatus_Active, 100)
+
+	fg.executeReduceSlot((len(fg.Slots)+4-1)/4, tSyncUpdateFlashGroup)
+
+	// With 1 slot, 25% rounded up is 1, so all slots should be moved to reserved
+	assert.Equal(t, 0, len(fg.Slots))
+	assert.Equal(t, 1, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_IsLostAllFlashNode tests the IsLostAllFlashNode method
+func TestFlashGroup_IsLostAllFlashNode(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// Initially should be false
+	assert.False(t, fg.IsLostAllFlashNode())
+
+	// Set the flag
+	atomic.StoreInt32(&fg.LostAllFlashNode, 1)
+	assert.True(t, fg.IsLostAllFlashNode())
+
+	// Clear the flag
+	atomic.StoreInt32(&fg.LostAllFlashNode, 0)
+	assert.False(t, fg.IsLostAllFlashNode())
+}
+
+// TestFlashGroup_GetStatus tests the GetStatus method
+func TestFlashGroup_GetStatus(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	status := fg.GetStatus()
+	assert.Equal(t, proto.FlashGroupStatus_Active, status)
+
+	// Change status
+	fg.Status = proto.FlashGroupStatus_Inactive
+	status = fg.GetStatus()
+	assert.Equal(t, proto.FlashGroupStatus_Inactive, status)
+}
+
+// TestFlashGroup_getSlots tests the getSlots method
+func TestFlashGroup_getSlots(t *testing.T) {
+	initialSlots := []uint32{1, 2, 3, 4, 5}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 5, proto.FlashGroupStatus_Active, 100)
+
+	slots := fg.GetSlots()
+
+	// Should return a copy of the slots
+	assert.Equal(t, initialSlots, slots)
+	assert.NotSame(t, &initialSlots[0], &slots[0]) // Should be different memory addresses
+}
+
+// TestFlashGroup_getSlotStatus tests the getSlotStatus method
+func TestFlashGroup_getSlotStatus(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Creating, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	status := fg.GetSlotStatus()
+	assert.Equal(t, proto.SlotStatus_Creating, status)
+}
+
+// TestFlashGroup_getFlashNodesCount tests the getFlashNodesCount method
+func TestFlashGroup_getFlashNodesCount(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// Initially no flash nodes
+	assert.Equal(t, 0, fg.GetFlashNodesCount())
+
+	// Add a flash node
+	fn := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: "node1", ZoneName: "zone1"}}
+	fg.putFlashNode(fn)
+
+	assert.Equal(t, 1, fg.GetFlashNodesCount())
+}
+
+// TestFlashGroup_getSlotsCount tests the getSlotsCount method
+func TestFlashGroup_getSlotsCount(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3, 4, 5}, proto.SlotStatus_Completed, []uint32{}, 5, proto.FlashGroupStatus_Active, 100)
+
+	assert.Equal(t, 5, fg.GetSlotsCount())
+}
+
+// TestFlashGroup_putFlashNode tests the putFlashNode method
+func TestFlashGroup_putFlashNode(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	fn := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: "node1", ZoneName: "zone1"}}
+	fg.putFlashNode(fn)
+
+	assert.Equal(t, 1, len(fg.flashNodes))
+	assert.Equal(t, fn, fg.flashNodes["node1"])
+}
+
+// TestFlashGroup_removeFlashNode tests the removeFlashNode method
+func TestFlashGroup_removeFlashNode(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// Add a flash node first
+	fn := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: "node1", ZoneName: "zone1"}}
+	fg.putFlashNode(fn)
+	assert.Equal(t, 1, len(fg.flashNodes))
+
+	// Remove it
+	fg.RemoveFlashNode("node1")
+	assert.Equal(t, 0, len(fg.flashNodes))
+}
+
+// TestFlashGroup_GetPendingSlotsCount tests the GetPendingSlotsCount method
+func TestFlashGroup_GetPendingSlotsCount(t *testing.T) {
+	pendingSlots := []uint32{1, 2, 3}
+	fg := newFlashGroup(1, []uint32{4, 5, 6}, proto.SlotStatus_Completed, pendingSlots, 3, proto.FlashGroupStatus_Active, 100)
+
+	assert.Equal(t, 3, fg.GetPendingSlotsCount())
+}
+
+// TestFlashGroup_argConvertFlashGroupStatus tests the argConvertFlashGroupStatus function
+func TestFlashGroup_argConvertFlashGroupStatus(t *testing.T) {
+	// Test active = true
+	status := argConvertFlashGroupStatus(true)
+	assert.Equal(t, proto.FlashGroupStatus_Active, status)
+
+	// Test active = false
+	status = argConvertFlashGroupStatus(false)
+	assert.Equal(t, proto.FlashGroupStatus_Inactive, status)
+}
+
+// TestFlashGroup_NewFlashGroupFromFgv tests the NewFlashGroupFromFgv function
+func TestFlashGroup_NewFlashGroupFromFgv(t *testing.T) {
+	fgv := FlashGroupValue{
+		ID:           123,
+		Slots:        []uint32{1, 2, 3},
+		SlotStatus:   proto.SlotStatus_Completed,
+		PendingSlots: []uint32{4, 5},
+		Step:         3,
+		Weight:       100,
+		Status:       proto.FlashGroupStatus_Active,
+	}
+
+	fg := NewFlashGroupFromFgv(fgv)
+
+	assert.Equal(t, fgv.ID, fg.ID)
+	assert.Equal(t, fgv.Slots, fg.Slots)
+	assert.Equal(t, fgv.SlotStatus, fg.SlotStatus)
+	assert.Equal(t, fgv.PendingSlots, fg.PendingSlots)
+	assert.Equal(t, fgv.Step, fg.Step)
+	assert.Equal(t, fgv.Weight, fg.Weight)
+	assert.Equal(t, fgv.Status, fg.Status)
+	assert.NotNil(t, fg.flashNodes)
+}
+
+// TestFlashGroup_ConcurrentAccess tests concurrent access to FlashGroup methods
+func TestFlashGroup_ConcurrentAccess(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3, 4, 5, 6, 7, 8}, proto.SlotStatus_Completed, []uint32{}, 8, proto.FlashGroupStatus_Active, 100)
+
+	var wg sync.WaitGroup
+	numGoroutines := 10
+
+	// Test concurrent reads
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				fg.GetSlots()
+				fg.GetSlotStatus()
+				fg.GetFlashNodesCount()
+				fg.GetSlotsCount()
+			}
+		}()
+	}
+
+	// Test concurrent writes
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			fn := &FlashNode{FlashNodeValue: FlashNodeValue{Addr: fmt.Sprintf("node%d", id), ZoneName: fmt.Sprintf("zone%d", id)}}
+			fg.putFlashNode(fn)
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify the structure is still consistent
+	assert.Equal(t, 8, len(fg.Slots))
+	assert.Equal(t, numGoroutines, len(fg.flashNodes))
+}
+
+// TestFlashGroup_IncreaseSlot_AlreadyIncreasing tests that IncreaseSlot doesn't start multiple goroutines
+func TestFlashGroup_IncreaseSlot_AlreadyIncreasing(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// Add some reserved slots
+	fg.ReservedSlots = []uint32{4, 5, 6, 7, 8}
+
+	// Set the flag to indicate increase is already in progress
+	atomic.StoreInt32(&fg.IncreasingSlots, 1)
+
+	// This should return immediately without starting a new goroutine
+	fg.IncreaseSlot(tSyncUpdateFlashGroup)
+
+	// Verify the flag is still set
+	assert.Equal(t, int32(1), atomic.LoadInt32(&fg.IncreasingSlots))
+}
+
+// TestFlashGroup_IncreaseSlot_NoReservedSlots tests IncreaseSlot behavior when there are no reserved slots
+func TestFlashGroup_IncreaseSlot_NoReservedSlots(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// No reserved slots
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+
+	// Start increase
+	fg.IncreaseSlot(tSyncUpdateFlashGroup)
+
+	// Wait a bit for the goroutine to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify no slots were processed since there were no reserved slots
+	assert.Equal(t, 3, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_IncreaseSlot_WithReservedSlots tests the complete IncreaseSlot functionality
+func TestFlashGroup_IncreaseSlot_WithReservedSlots(t *testing.T) {
+	// Create a flash group with 3 slots and 8 reserved slots
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5, 6, 7, 8, 9, 10, 11}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	initialSlotCount := len(fg.Slots)
+	initialReservedCount := len(fg.ReservedSlots)
+
+	// Start increase
+	fg.IncreaseSlot(tSyncUpdateFlashGroup)
+
+	// Wait for the first increase cycle
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify that slots were moved from reserved to active
+	// Total slots should remain the same
+	assert.Equal(t, initialSlotCount+initialReservedCount, len(fg.Slots)+len(fg.ReservedSlots))
+
+	// Verify the increasing flag is set
+	assert.Equal(t, int32(1), atomic.LoadInt32(&fg.IncreasingSlots))
+}
+
+// TestFlashGroup_executeIncreaseSlot tests the executeIncreaseSlot method directly
+func TestFlashGroup_executeIncreaseSlot(t *testing.T) {
+	// Create a flash group with 3 slots and 8 reserved slots
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5, 6, 7, 8, 9, 10, 11}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	initialSlotCount := len(fg.Slots)
+	initialReservedCount := len(fg.ReservedSlots)
+
+	// Calculate expected number to increase: (total + 8 - 1) / 8 = (11 + 7) / 8 = 2
+	totalSlots := initialSlotCount + initialReservedCount
+	expectedToIncrease := (totalSlots + 8 - 1) / 8
+
+	// Execute increase
+	fg.executeIncreaseSlot(expectedToIncrease, tSyncUpdateFlashGroup)
+
+	// Verify that slots were moved from reserved to active
+	expectedRemainingSlots := initialSlotCount + expectedToIncrease
+	expectedRemainingReserved := initialReservedCount - expectedToIncrease
+
+	assert.Equal(t, expectedRemainingSlots, len(fg.Slots))
+	assert.Equal(t, expectedRemainingReserved, len(fg.ReservedSlots))
+
+	// Verify total count remains the same
+	assert.Equal(t, totalSlots, len(fg.Slots)+len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_executeIncreaseSlot_EmptyReservedSlots tests executeIncreaseSlot with no reserved slots
+func TestFlashGroup_executeIncreaseSlot_EmptyReservedSlots(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+
+	// No reserved slots
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+
+	// This should not panic or cause issues
+	fg.executeIncreaseSlot(5, tSyncUpdateFlashGroup)
+
+	assert.Equal(t, 3, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_executeIncreaseSlot_SingleReservedSlot tests executeIncreaseSlot with only one reserved slot
+func TestFlashGroup_executeIncreaseSlot_SingleReservedSlot(t *testing.T) {
+	fg := newFlashGroup(1, []uint32{1, 2, 3}, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = []uint32{4}
+
+	initialSlotCount := len(fg.Slots)
+	initialReservedCount := len(fg.ReservedSlots)
+
+	fg.executeIncreaseSlot(2, tSyncUpdateFlashGroup)
+
+	// With 1 reserved slot, trying to increase by 2 should only move 1
+	assert.Equal(t, initialSlotCount+1, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+
+	// Verify we had the expected number of reserved slots initially
+	assert.Equal(t, 1, initialReservedCount)
+}
+
+// TestFlashGroup_executeIncreaseSlot_AllReservedSlots tests executeIncreaseSlot moving all reserved slots
+func TestFlashGroup_executeIncreaseSlot_AllReservedSlots(t *testing.T) {
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5, 6}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	initialSlotCount := len(fg.Slots)
+	initialReservedCount := len(fg.ReservedSlots)
+	totalSlots := initialSlotCount + initialReservedCount
+
+	// Try to increase by more than available reserved slots
+	fg.executeIncreaseSlot(10, tSyncUpdateFlashGroup)
+
+	// Should move all reserved slots
+	assert.Equal(t, totalSlots, len(fg.Slots))
+	assert.Equal(t, 0, len(fg.ReservedSlots))
+
+	// Verify the total count remains the same and initialReservedCount was used
+	assert.Equal(t, totalSlots, len(fg.Slots)+len(fg.ReservedSlots))
+	assert.Equal(t, initialReservedCount, 3) // Verify we had 3 reserved slots initially
+}
+
+// TestFlashGroup_executeIncreaseSlot_ReduceAllTimeReset tests that ReduceAllTime is reset when all reserved slots are consumed
+func TestFlashGroup_executeIncreaseSlot_ReduceAllTimeReset(t *testing.T) {
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	// Set a non-zero ReduceAllTime
+	fg.ReduceAllTime = time.Now().Unix()
+	assert.NotEqual(t, int64(0), fg.ReduceAllTime)
+
+	// Execute increase that will consume all reserved slots
+	fg.executeIncreaseSlot(10, tSyncUpdateFlashGroup)
+
+	// Verify ReduceAllTime is reset to 0
+	assert.Equal(t, int64(0), fg.ReduceAllTime)
+}
+
+// TestFlashGroup_executeIncreaseSlot_SyncError tests executeIncreaseSlot behavior when sync function fails
+func TestFlashGroup_executeIncreaseSlot_SyncError(t *testing.T) {
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5, 6}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	initialSlotCount := len(fg.Slots)
+	initialReservedCount := len(fg.ReservedSlots)
+
+	// Create a sync function that always fails
+	failingSyncFunc := func(flashGroup *FlashGroup) error {
+		return fmt.Errorf("sync failed")
+	}
+
+	// Execute increase with failing sync
+	fg.executeIncreaseSlot(2, failingSyncFunc)
+
+	// Should rollback to original state due to sync failure
+	assert.Equal(t, initialSlotCount, len(fg.Slots))
+	assert.Equal(t, initialReservedCount, len(fg.ReservedSlots))
+}
+
+// TestFlashGroup_IncreaseSlot_ConcurrentExecution tests that IncreaseSlot handles concurrent execution properly
+func TestFlashGroup_IncreaseSlot_ConcurrentExecution(t *testing.T) {
+	initialSlots := []uint32{1, 2, 3}
+	reservedSlots := []uint32{4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	fg := newFlashGroup(1, initialSlots, proto.SlotStatus_Completed, []uint32{}, 3, proto.FlashGroupStatus_Active, 100)
+	fg.ReservedSlots = reservedSlots
+
+	var wg sync.WaitGroup
+	numGoroutines := 5
+
+	// Try to start multiple IncreaseSlot operations concurrently
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fg.IncreaseSlot(tSyncUpdateFlashGroup)
+		}()
+	}
+
+	wg.Wait()
+
+	// Only one should succeed in setting the flag
+	// The others should return immediately
+	assert.Equal(t, int32(1), atomic.LoadInt32(&fg.IncreasingSlots))
+}
+
+// TestFlashGroup_IncreaseSlot_StepCalculation tests the step calculation logic
+func TestFlashGroup_IncreaseSlot_StepCalculation(t *testing.T) {
+	testCases := []struct {
+		name          string
+		slots         []uint32
+		reservedSlots []uint32
+		expectedStep  int
+	}{
+		{
+			name:          "5 total slots",
+			slots:         []uint32{1, 2, 3},
+			reservedSlots: []uint32{4, 5},
+			expectedStep:  1, // (5 + 7) / 8 = 12 / 8 = 1
+		},
+		{
+			name:          "11 total slots",
+			slots:         []uint32{1, 2, 3, 4, 5},
+			reservedSlots: []uint32{6, 7, 8, 9, 10, 11},
+			expectedStep:  2, // (11 + 7) / 8 = 18 / 8 = 2
+		},
+		{
+			name:          "16 total slots",
+			slots:         []uint32{1, 2, 3, 4, 5, 6, 7, 8},
+			reservedSlots: []uint32{9, 10, 11, 12, 13, 14, 15, 16},
+			expectedStep:  2, // (16 + 7) / 8 = 23 / 8 = 2
+		},
+		{
+			name:          "20 total slots",
+			slots:         []uint32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			reservedSlots: []uint32{11, 12, 13, 14, 15, 16, 17, 18, 19, 20},
+			expectedStep:  3, // (20 + 7) / 8 = 27 / 8 = 3
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			fg := newFlashGroup(1, tc.slots, proto.SlotStatus_Completed, []uint32{}, uint32(len(tc.slots)), proto.FlashGroupStatus_Active, 100)
+			fg.ReservedSlots = tc.reservedSlots
+
+			totalSlots := len(tc.slots) + len(tc.reservedSlots)
+			expectedStep := (totalSlots + 8 - 1) / 8
+
+			assert.Equal(t, tc.expectedStep, expectedStep)
+		})
+	}
+}

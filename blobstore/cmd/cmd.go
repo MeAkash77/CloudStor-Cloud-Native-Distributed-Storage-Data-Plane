@@ -1,0 +1,243 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package cmd
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
+	"time"
+
+	"github.com/cubefs/cubefs/blobstore/common/config"
+	"github.com/cubefs/cubefs/blobstore/common/profile"
+	"github.com/cubefs/cubefs/blobstore/common/rpc"
+	"github.com/cubefs/cubefs/blobstore/common/rpc/auditlog"
+	"github.com/cubefs/cubefs/blobstore/common/rpc/auth"
+	auth_proto "github.com/cubefs/cubefs/blobstore/common/rpc/auth/proto"
+	"github.com/cubefs/cubefs/blobstore/common/rpc2"
+	"github.com/cubefs/cubefs/blobstore/util/defaulter"
+	"github.com/cubefs/cubefs/blobstore/util/graceful"
+	"github.com/cubefs/cubefs/blobstore/util/log"
+
+	// module release init functions
+	_ "github.com/cubefs/cubefs/blobstore/util/version"
+)
+
+const (
+	defaultShutdownTimeoutS = 30
+)
+
+type Config struct {
+	MaxProcs         int    `json:"max_procs"`
+	BindAddr         string `json:"bind_addr"`
+	ShutdownTimeoutS int    `json:"shutdown_timeout_s"`
+
+	Log *log.AsyncLogger `json:"log"`
+
+	AuditLog auditlog.Config   `json:"auditlog"`
+	Auth     auth_proto.Config `json:"auth"`
+
+	Rpc2Server *rpc2.Server `json:"rpc2_server,omitempty"`
+}
+
+type Module struct {
+	Name       string
+	InitConfig func(args []string) (*Config, error)
+	SetUp      func() (*rpc.Router, []rpc.ProgressHandler)
+	SetUp2     func() (*rpc2.Router, []rpc2.Interceptor)
+	TearDown   func()
+	graceful   bool
+}
+
+var mod *Module
+
+func RegisterModule(m *Module) {
+	mod = m
+	mod.graceful = false
+}
+
+func RegisterGracefulModule(m *Module) {
+	mod = m
+	mod.graceful = true
+}
+
+func Main(args []string) {
+	cfg, err := mod.InitConfig(args)
+	if err != nil {
+		log.Fatalf("init config error: %v", err)
+	}
+	if cfg.MaxProcs > 0 {
+		runtime.GOMAXPROCS(cfg.MaxProcs)
+	}
+	if cfg.Log == nil {
+		cfg.Log = &log.AsyncLogger{}
+	}
+	log.SetOutputLevel(cfg.Log.Level)
+	registerLogLevel()
+	if cfg.Log.Filename != "" {
+		defaulter.IntegerLessOrEqual(&cfg.Log.MaxSize, 1024)
+		defaulter.IntegerLessOrEqual(&cfg.Log.MaxAge, 7)
+		defaulter.IntegerLessOrEqual(&cfg.Log.MaxBackups, 7)
+		cfg.Log.LocalTime = true
+		log.SetOutput(cfg.Log)
+	}
+	if cfg.ShutdownTimeoutS <= 0 {
+		cfg.ShutdownTimeoutS = defaultShutdownTimeoutS
+	}
+
+	lh, logf, err := auditlog.Open(mod.Name, &cfg.AuditLog)
+	if err != nil {
+		log.Fatal("failed to open auditlog:", err)
+	}
+	if logf != nil {
+		defer logf.Close()
+	}
+
+	ctx, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	config.HotReload(ctx, config.ConfName())
+
+	// new profile handler firstly
+	profileHandler := profile.NewProfileHandler(cfg.BindAddr)
+
+	if mod.SetUp != nil && mod.graceful {
+		programEntry := func(state *graceful.State) {
+			router, handlers := mod.SetUp()
+			httpServer := &http.Server{
+				Addr:         cfg.BindAddr,
+				Handler:      reorderMiddleWareHandlers(router, lh, profileHandler, cfg.Auth, handlers),
+				ReadTimeout:  5 * time.Minute,
+				WriteTimeout: 5 * time.Minute,
+			}
+
+			log.Info("server is running at:", cfg.BindAddr)
+			go func() {
+				if err := httpServer.Serve(state.ListenerFds[0].(*net.TCPListener)); err != nil && err != http.ErrServerClosed {
+					log.Fatal("server exits:", err)
+				}
+			}()
+
+			// wait for signal
+			<-state.CloseCh
+			log.Info("graceful shutdown...")
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutS)*time.Second)
+			defer cancel()
+			httpServer.Shutdown(ctx)
+
+			if mod.TearDown != nil {
+				mod.TearDown()
+			}
+		}
+		graceful.Run(&graceful.Config{
+			Entry:           programEntry,
+			ListenAddresses: []string{cfg.BindAddr},
+		})
+		return
+	}
+
+	var shutdowns []func(context.Context)
+	if mod.SetUp2 != nil {
+		router, interceptors := mod.SetUp2()
+		rpc2Server := cfg.Rpc2Server
+		rpc2Server.Handler = rpc2Handler(router, lh, cfg.Auth, interceptors)
+		log.Info("rpc2 Server is running at", rpc2Server.Addresses)
+		go func() {
+			if err := rpc2Server.Serve(); err != nil && err != rpc2.ErrServerClosed {
+				log.Fatalf("rpc2 Server exits, err: %v", err)
+			}
+		}()
+		shutdowns = append(shutdowns, func(ctx context.Context) { rpc2Server.Shutdown(ctx) })
+	}
+
+	if mod.SetUp != nil {
+		router, handlers := mod.SetUp()
+		httpServer := &http.Server{
+			Addr:         cfg.BindAddr,
+			Handler:      reorderMiddleWareHandlers(router, lh, profileHandler, cfg.Auth, handlers),
+			ReadTimeout:  5 * time.Minute,
+			WriteTimeout: 5 * time.Minute,
+		}
+
+		log.Info("Server is running at", cfg.BindAddr)
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("Server exits, err: %v", err)
+			}
+		}()
+		shutdowns = append(shutdowns, func(ctx context.Context) { httpServer.Shutdown(ctx) })
+	}
+
+	// wait for signal
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-ch
+	log.Infof("receive signal: %s, stop service...", sig.String())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeoutS)*time.Second)
+	defer cancel()
+	for _, shutdown := range shutdowns {
+		shutdown(ctx)
+	}
+
+	if mod.TearDown != nil {
+		mod.TearDown()
+	}
+}
+
+// reorderMiddleWareHandlers
+//
+//	the order of handlers in MiddlewareHandler has some constraints:
+//	1. the first is router,
+//	2. the second is AuditLog handler,
+//	3. the third is profile handler if config,
+//	4. the fourth is Auth handler if config,
+//	5. others self define handlers by modules.
+func reorderMiddleWareHandlers(r *rpc.Router, lh, profileHandler rpc.ProgressHandler,
+	authCfg auth_proto.Config, handlers []rpc.ProgressHandler,
+) (mux http.Handler) {
+	hs := []rpc.ProgressHandler{lh}
+	if profileHandler != nil {
+		hs = append(hs, profileHandler)
+	}
+	if authCfg.EnableAuth && authCfg.Secret != "" {
+		hs = append(hs, auth.New(&authCfg))
+	}
+	hs = append(hs, handlers...)
+	return rpc.MiddlewareHandlerWith(r, hs...)
+}
+
+func rpc2Handler(r *rpc2.Router, auditlogIc rpc2.Interceptor,
+	authCfg auth_proto.Config, interceptors []rpc2.Interceptor,
+) rpc2.Handle {
+	r.Interceptor(auditlogIc)
+	if authCfg.EnableAuth && authCfg.Secret != "" {
+		r.Interceptor(auth.New(&authCfg))
+	}
+	r.Interceptor(interceptors...)
+	return r.MakeHandler()
+}
+
+func registerLogLevel() {
+	logLevelPath, logLevelHandler := log.ChangeDefaultLevelHandler()
+	profile.HandleFunc(http.MethodPost, logLevelPath, func(c *rpc.Context) {
+		logLevelHandler.ServeHTTP(c.Writer, c.Request)
+	})
+	profile.HandleFunc(http.MethodGet, logLevelPath, func(c *rpc.Context) {
+		logLevelHandler.ServeHTTP(c.Writer, c.Request)
+	})
+}

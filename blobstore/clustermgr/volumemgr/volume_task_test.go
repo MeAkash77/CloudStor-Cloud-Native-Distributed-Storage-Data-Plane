@@ -1,0 +1,276 @@
+// Copyright 2022 The CubeFS Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied. See the License for the specific language governing
+// permissions and limitations under the License.
+
+package volumemgr
+
+import (
+	"context"
+	"math/rand"
+	"os"
+	"path"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	cm "github.com/cubefs/cubefs/blobstore/api/clustermgr"
+	"github.com/cubefs/cubefs/blobstore/clustermgr/base"
+	"github.com/cubefs/cubefs/blobstore/clustermgr/cluster"
+	"github.com/cubefs/cubefs/blobstore/clustermgr/persistence/volumedb"
+	"github.com/cubefs/cubefs/blobstore/common/codemode"
+	apierrs "github.com/cubefs/cubefs/blobstore/common/errors"
+	"github.com/cubefs/cubefs/blobstore/common/kvstore"
+	"github.com/cubefs/cubefs/blobstore/common/proto"
+	"github.com/cubefs/cubefs/blobstore/common/trace"
+	"github.com/cubefs/cubefs/blobstore/testing/mocks"
+)
+
+func TestTaskProc(t *testing.T) {
+	tmpTaskDb := path.Join(os.TempDir(), "taskDb-"+strconv.Itoa(rand.Intn(100)))
+	defer os.RemoveAll(tmpTaskDb)
+
+	db, err := volumedb.Open(tmpTaskDb, kvstore.WithWriteBufferSize(1<<22))
+	require.Nil(t, err)
+	volumeTbl, err := volumedb.OpenVolumeTable(db)
+	require.Nil(t, err)
+
+	ctrl := gomock.NewController(t)
+	raftServer := mocks.NewMockRaftServer(ctrl)
+	raftServer.EXPECT().Propose(gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
+	raftServer.EXPECT().IsLeader().AnyTimes().Return(true)
+
+	dnClient := mocks.NewMockStorageAPI(ctrl)
+	dnClient.EXPECT().SetChunkReadonly(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
+	dnClient.EXPECT().SetChunkReadwrite(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
+
+	diskmgr := cluster.NewMockBlobNodeManagerAPI(ctrl)
+	diskmgr.EXPECT().GetDiskInfo(gomock.Any(), gomock.Any()).AnyTimes().Return(&cm.BlobNodeDiskInfo{DiskInfo: cm.DiskInfo{Host: "127.0.0.1:8080"}}, nil)
+
+	volMgr := &VolumeMgr{
+		volumeTbl:      volumeTbl,
+		taskMgr:        newTaskManager(10),
+		raftServer:     raftServer,
+		all:            newShardedVolumes(8),
+		diskMgr:        diskmgr,
+		blobNodeClient: dnClient,
+	}
+
+	allocConfig := allocConfig{
+		codeModes:       map[codemode.CodeMode]codeModeConf{1: {mode: 1}},
+		allocatableSize: 0,
+	}
+	volAllocator := newVolumeAllocator(allocConfig)
+	volMgr.allocator = volAllocator
+
+	volRec := &volumedb.VolumeRecord{
+		Vid:      2,
+		CodeMode: 1,
+		Status:   proto.VolumeStatusLock,
+	}
+	taskRec := &volumedb.VolumeTaskRecord{
+		Vid:      2,
+		TaskType: base.VolumeTaskTypeLock,
+		TaskId:   uuid.NewString(),
+	}
+	volumeTbl.PutVolumeAndTask(volRec, taskRec)
+
+	err = volMgr.reloadTasks()
+	require.Nil(t, err)
+
+	vunits := []*volumeUnit{
+		{
+			vuidPrefix: proto.EncodeVuidPrefix(1, 0),
+			epoch:      0,
+			nextEpoch:  1,
+			vuInfo: &cm.VolumeUnitInfo{
+				Vuid:   proto.EncodeVuid(proto.EncodeVuidPrefix(1, 0), 0),
+				DiskID: 1000,
+			},
+		},
+		{
+			vuidPrefix: proto.EncodeVuidPrefix(1, 1),
+			epoch:      0,
+			nextEpoch:  1,
+			vuInfo: &cm.VolumeUnitInfo{
+				Vuid:   proto.EncodeVuid(proto.EncodeVuidPrefix(1, 1), 0),
+				DiskID: 2000,
+			},
+		},
+	}
+	vol := &volume{
+		vid:    1,
+		vUnits: vunits,
+		volInfoBase: cm.VolumeInfoBase{
+			CodeMode: 1,
+			Status:   proto.VolumeStatusIdle,
+		},
+	}
+	volMgr.all.putVol(vol)
+	_, ctx := trace.StartSpanFromContext(context.Background(), "")
+	// volume lock
+	args := &ChangeVolStatusCtx{
+		Vid:      vol.vid,
+		TaskID:   uuid.New().String(),
+		TaskType: base.VolumeTaskTypeLock,
+		Epoch:    vol.getEpoch(),
+	}
+	volMgr.applyVolumeTask(ctx, args)
+	require.Equal(t, proto.VolumeStatusLock, vol.volInfoBase.Status)
+	taskid, hit := volMgr.lastTaskIdMap.Load(vol.vid)
+	require.True(t, hit)
+	time.Sleep(100 * time.Millisecond)
+	volMgr.applyRemoveVolumeTask(ctx, vol.vid, taskid.(string), base.VolumeTaskTypeLock)
+	_, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+	require.False(t, hit)
+
+	// volume unlock
+	args = &ChangeVolStatusCtx{
+		Vid:      vol.vid,
+		TaskID:   uuid.New().String(),
+		TaskType: base.VolumeTaskTypeUnlock,
+		Epoch:    vol.getEpoch(),
+	}
+	volMgr.applyVolumeTask(ctx, args)
+	taskid, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+	require.True(t, hit)
+	time.Sleep(100 * time.Millisecond) // wait task finish
+	volMgr.applyRemoveVolumeTask(ctx, vol.vid, taskid.(string), base.VolumeTaskTypeUnlock)
+	require.Equal(t, proto.VolumeStatusIdle, vol.volInfoBase.Status)
+
+	// test unlock volume force
+	{
+		args = &ChangeVolStatusCtx{
+			Vid:      vol.vid,
+			TaskID:   uuid.New().String(),
+			TaskType: base.VolumeTaskTypeLock,
+			Epoch:    vol.getEpoch(),
+		}
+		volMgr.applyVolumeTask(ctx, args)
+		require.Equal(t, proto.VolumeStatusLock, vol.volInfoBase.Status)
+		taskid, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+		require.True(t, hit)
+		time.Sleep(100 * time.Millisecond)
+		volMgr.applyRemoveVolumeTask(ctx, vol.vid, taskid.(string), base.VolumeTaskTypeLock)
+		_, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+		require.False(t, hit)
+
+		args = &ChangeVolStatusCtx{
+			Vid:      vol.vid,
+			TaskID:   uuid.New().String(),
+			TaskType: base.VolumeTaskTypeUnlock,
+			Epoch:    vol.getEpoch(),
+		}
+		volMgr.applyVolumeTask(ctx, args)
+		_, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+		require.True(t, hit)
+		// unlock volume force, replace the old unlock volume task
+		args = &ChangeVolStatusCtx{
+			Vid:      vol.vid,
+			TaskID:   uuid.New().String(),
+			TaskType: base.VolumeTaskTypeUnlockForce,
+			Epoch:    vol.getEpoch(),
+		}
+		err = volMgr.applyVolumeTask(ctx, args)
+		require.NoError(t, err)
+		taskid, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+		require.True(t, hit)
+		// unlock volume force repeatedly
+		args = &ChangeVolStatusCtx{
+			Vid:      vol.vid,
+			TaskID:   uuid.New().String(),
+			TaskType: base.VolumeTaskTypeUnlockForce,
+			Epoch:    vol.getEpoch(),
+		}
+		err = volMgr.applyVolumeTask(ctx, args)
+		require.NoError(t, err)
+		err = volMgr.applyRemoveVolumeTask(ctx, vol.vid, taskid.(string), base.VolumeTaskTypeUnlockForce)
+		require.NoError(t, err)
+		_, hit = volMgr.lastTaskIdMap.Load(vol.vid)
+		require.False(t, hit)
+	}
+
+	// delete task
+	task := newVolTask(taskRec.Vid, taskRec.TaskType, taskRec.TaskId, volMgr.setVolumeStatus)
+	err = volMgr.deleteTask(ctx, task)
+	require.NoError(t, err)
+}
+
+func TestSetVolumeStatus(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	raftServer := mocks.NewMockRaftServer(ctrl)
+	raftServer.EXPECT().Propose(gomock.Any(), gomock.Any()).AnyTimes().Return(nil)
+	raftServer.EXPECT().IsLeader().AnyTimes().Return(true)
+	dnClient := mocks.NewMockStorageAPI(ctrl)
+	diskmgr := cluster.NewMockBlobNodeManagerAPI(ctrl)
+	diskmgr.EXPECT().GetDiskInfo(gomock.Any(), gomock.Any()).AnyTimes().Return(&cm.BlobNodeDiskInfo{DiskInfo: cm.DiskInfo{Host: "127.0.0.1:8080"}}, nil)
+	volMgr := &VolumeMgr{
+		taskMgr:        newTaskManager(10),
+		raftServer:     raftServer,
+		all:            newShardedVolumes(8),
+		diskMgr:        diskmgr,
+		blobNodeClient: dnClient,
+	}
+	vunits := []*volumeUnit{
+		{
+			vuidPrefix: proto.EncodeVuidPrefix(1, 0),
+			epoch:      0,
+			nextEpoch:  1,
+			vuInfo: &cm.VolumeUnitInfo{
+				Vuid:   proto.EncodeVuid(proto.EncodeVuidPrefix(1, 0), 0),
+				DiskID: 1000,
+			},
+		},
+		{
+			vuidPrefix: proto.EncodeVuidPrefix(1, 1),
+			epoch:      0,
+			nextEpoch:  1,
+			vuInfo: &cm.VolumeUnitInfo{
+				Vuid:   proto.EncodeVuid(proto.EncodeVuidPrefix(1, 1), 0),
+				DiskID: 2000,
+			},
+		},
+	}
+	vol := &volume{
+		vid:    1,
+		vUnits: vunits,
+		volInfoBase: cm.VolumeInfoBase{
+			CodeMode: 1,
+			Status:   proto.VolumeStatusLock,
+		},
+	}
+	volMgr.all.putVol(vol)
+	task := &volTask{
+		vid:      1,
+		taskType: base.VolumeTaskTypeUnlock,
+		taskId:   uuid.NewString(),
+	}
+	// test set disk chunk readwrite with DiskNotFound error while disk is dropping, should be success
+	{
+		dnClient.EXPECT().SetChunkReadwrite(gomock.Any(), gomock.Any(), gomock.Any()).Times(2).Return(apierrs.ErrNoSuchDisk)
+		diskmgr.EXPECT().IsDroppingDisk(gomock.Any(), gomock.Any()).Times(2).Return(true, nil)
+		err := volMgr.setVolumeStatus(task)
+		require.NoError(t, err)
+	}
+	// test set disk chunk readwrite with DiskNotFound error while disk is is dropping
+	{
+		task.context = nil
+		dnClient.EXPECT().SetChunkReadwrite(gomock.Any(), gomock.Any(), gomock.Any()).Times(2).Return(apierrs.ErrNoSuchDisk)
+		diskmgr.EXPECT().IsDroppingDisk(gomock.Any(), gomock.Any()).Times(2).Return(false, nil)
+		err := volMgr.setVolumeStatus(task)
+		require.ErrorIs(t, err, apierrs.ErrNoSuchDisk)
+	}
+}
