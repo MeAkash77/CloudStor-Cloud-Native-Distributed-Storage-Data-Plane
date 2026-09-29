@@ -48,19 +48,6 @@ Some key features of Cubestor include:
 
 [Governance documentation](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md) plays a crucial role in establishing clear guidelines, procedures, and structures within an organization or project
 
-## Contribute
-[Contributing to CubeFS](https://github.com/cubefs/cubefs/blob/master/CONTRIBUTING.md)
-
-There is a clear definition of roles and their promotion paths.
-- [Becoming a Maintainer](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md#becoming-a-maintainer)
-- [Becoming a committer](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md#becoming-a-committer)
-- [Becoming a TSC Member](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md#becoming-a-tsc-member)
-
-
-## Partners and Users
-
-There is the list of users and success stories [ADOPTERS.md](ADOPTERS.md).
-
 ## Reference
 
 Haifeng Liu, et al., CFS: A Distributed File System for Large Scale Container Platforms. SIGMOD‘19, June 30-July 5, 2019, Amsterdam, Netherlands. 
