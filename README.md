@@ -16,10 +16,6 @@
 [![Tag](https://img.shields.io/github/v/tag/cubefs/cubefs.svg?color=ee8936&logo=fitbit&style=flat-square)](https://github.com/cubefs/cubefs/tags)
 [![Gurubase](https://img.shields.io/badge/Gurubase-Ask%20CubeFS%20Guru-006BFF)](https://gurubase.io/g/cubefs)
 
-|<img src="https://user-images.githubusercontent.com/5708406/91202310-31eaab80-e734-11ea-84fc-c1b1882ae71c.png" height="24"/>&nbsp;Community Meeting|
-|------------------|
-| The CubeFS Project holds bi-weekly community online meeting. To join or watch previous meeting notes and recordings, please see [meeting schedule](https://github.com/cubefs/community/wiki/Meeting-Schedule) and [meeting minutes](https://github.com/cubefs/community/wiki/Meeting-Agenda-and-Notes). |
-
 # CloudStor — Cloud-Native Distributed Storage Data Plane 🚀
 
 *A cloud-native distributed storage data plane engineered around scalable metadata management, distributed data placement, replication, erasure coding, object storage, multi-tenancy, caching, and fault-tolerant coordination.*
