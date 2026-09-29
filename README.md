@@ -44,20 +44,6 @@ Some key features of Cubestor include:
 
 <div width="100%" style="text-align:center;"><img alt="CubeFS Architecture" src="https://raw.githubusercontent.com/cubefs/cubefs/master/docs/source/overview/pic/cfs-arch-ec.png"/></div>
 
-## Documents
-
-- English version: https://cubefs.io/docs/master/overview/introduction.html
-- Chinese version: https://cubefs.io/zh/docs/master/overview/introduction.html
-
-## Community
-
-- Homepage: [cubefs.io](https://cubefs.io/)
-- Mailing list: users@cubefs.groups.io. 
-	- Please subscribe on the page https://groups.io/g/cubefs-users/ or send your email to cubefs-users+subscribe@groups.io to apply.
-- Slack: [cubefs.slack.com](https://cubefs.slack.com/)
-- WeChat: detail see [here](https://github.com/cubefs/cubefs/issues/604)
-- Twitter: [cubefs_storage](https://twitter.com/cubefs_storage)
-
 ## Governance
 
 [Governance documentation](https://github.com/cubefs/cubefs/blob/master/GOVERNANCE.md) plays a crucial role in establishing clear guidelines, procedures, and structures within an organization or project
